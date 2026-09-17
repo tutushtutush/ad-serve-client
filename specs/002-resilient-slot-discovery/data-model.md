@@ -17,8 +17,8 @@ undetermined.
 | `currentElement`         | `Element \| null`     | Re-resolved on every observed mutation (data-model "State Transitions" below); `null` means no element currently occupies this slot's `(config, groupPosition)` |
 | `ad`                     | `AdCandidate \| null` | **Amended.** Set once the ad decision arrives filled; remembered so a redisplay (FR-009) reuses the same ad rather than requesting again (research.md) |
 | `renderedElement`        | `Element \| null`     | **Amended.** The specific element last rendered into; checked each mutation batch for disconnection to detect the FR-009 case |
-| `redisplaysRemaining`    | integer               | **Amended.** Starts at 2 on first successful render; decremented each time a redisplay actually happens (FR-010) |
-| `quietBatchesRemaining`  | integer               | **Amended.** Starts at 3 on every (re)display, reset on each redisplay; decremented each mutation batch where `renderedElement` was still connected — reaching 0 means "settled," done |
+| `redisplaysRemaining`    | integer               | **Amended.** Starts at 3 on first successful render (research.md — tuned against the real environment); decremented each time a redisplay actually happens (FR-010) |
+| `quietBatchesRemaining`  | integer               | **Amended.** Starts at 10 on every (re)display (research.md — tuned against the real environment), reset on each redisplay; decremented each mutation batch where `renderedElement` was still connected — reaching 0 means "settled," done |
 | `resolved`               | boolean               | Set once an outcome is *finally* determined (empty, or filled-and-survived-the-watch-window); once `true`, this Tracked Slot is dropped and no longer updated (FR-008) |
 
 ## Configuration Group (internal, derived — not persisted)
@@ -55,7 +55,7 @@ discovered → (invalid config) ────────────────
      │
      ▼ currentElement is set
   rendered (renderedElement := currentElement, ad := result.ad,
-            redisplaysRemaining := 2, quietBatchesRemaining := 3)
+            redisplaysRemaining := 3, quietBatchesRemaining := 10)
      │
      │ ◄── loop: on each subsequent mutation batch ──────────────────────┐
      │                                                                    │
@@ -73,7 +73,7 @@ discovered → (invalid config) ────────────────
           │     state it last reached" — here, that state is empty)
           └─ redisplaysRemaining > 0 ──► redisplay into the current element
                     (renderedElement := that element, redisplaysRemaining -= 1,
-                     quietBatchesRemaining reset to 3) ──► back to the loop above
+                     quietBatchesRemaining reset to 10) ──► back to the loop above
 ```
 
 Unlike feature 001, `currentElement` reassignment itself is not a state transition that produces

@@ -52,12 +52,28 @@ function makeGroupKey(config: AdDecisionRequest): string {
   return JSON.stringify([config.platformId, config.adTypeId, config.country ?? null, config.deviceType ?? null]);
 }
 
+// How many times a slot's ad may be (re)displayed after the first successful
+// render if it keeps getting removed (FR-010), and how many consecutive
+// mutation batches it must survive, once (re)displayed, before it's
+// considered settled and watching stops (FR-008). Both are bounded by
+// discrete events, not wall-clock time (research.md).
+const INITIAL_REDISPLAYS_REMAINING = 3;
+const INITIAL_QUIET_BATCHES_REMAINING = 10;
+
 interface TrackedSlot {
   config: AdDecisionRequest;
   groupKey: string;
   groupPosition: number;
   currentElement: Element | null;
   resolved: boolean;
+  // Set once the ad decision arrives filled; remembered so a redisplay
+  // (FR-009) reuses it rather than requesting again (research.md).
+  ad: AdCandidate | null;
+  // The specific element last rendered into — checked each mutation batch
+  // for disconnection to detect the FR-009 case.
+  renderedElement: Element | null;
+  redisplaysRemaining: number;
+  quietBatchesRemaining: number;
 }
 
 // Groups every currently-discoverable, validly-configured slot element by
@@ -88,6 +104,7 @@ export function createAdOrchestrator({ client, renderer }: AdOrchestratorDeps) {
     try {
       const result = await client.requestAd(slot.config);
       if (result.status !== "filled") {
+        slot.resolved = true;
         return;
       }
 
@@ -96,13 +113,21 @@ export function createAdOrchestrator({ client, renderer }: AdOrchestratorDeps) {
       // flight (FR-003). isConnected is a final safety net against a
       // last-instant removal the observer hasn't reacted to yet.
       if (!slot.currentElement || !slot.currentElement.isConnected) {
+        slot.resolved = true;
         return;
       }
 
+      slot.ad = result.ad;
       renderer.renderAd(slot.currentElement, result.ad);
-    } finally {
-      // Once an outcome is determined, this slot is done — no further
-      // mutation observation affects it (FR-008).
+      slot.renderedElement = slot.currentElement;
+      // Deliberately not resolved yet: the render may itself be undone
+      // shortly afterward by the host page's own redraw (e.g. a hydration
+      // mismatch discarding the subtree it landed in) — the mutation
+      // observer watches renderedElement and redisplays if needed, up to
+      // a bounded number of attempts, before finally settling (FR-009/010).
+    } catch {
+      // A slot that fails for any unexpected reason simply stays empty —
+      // never let it escape to the host page (Constitution Principle V).
       slot.resolved = true;
     }
   }
@@ -131,6 +156,10 @@ export function createAdOrchestrator({ client, renderer }: AdOrchestratorDeps) {
         groupPosition,
         currentElement: element,
         resolved: false,
+        ad: null,
+        renderedElement: null,
+        redisplaysRemaining: INITIAL_REDISPLAYS_REMAINING,
+        quietBatchesRemaining: INITIAL_QUIET_BATCHES_REMAINING,
       });
     }
 
@@ -138,41 +167,68 @@ export function createAdOrchestrator({ client, renderer }: AdOrchestratorDeps) {
       return; // nothing to track, nothing to observe
     }
 
-    function remapCurrentElements(): void {
-      try {
-        const currentByPosition = mapSlotsByGroupPosition(root);
-        for (const slot of trackedSlots) {
-          if (slot.resolved) {
-            continue;
-          }
-          slot.currentElement = currentByPosition.get(`${slot.groupKey}#${slot.groupPosition}`) ?? null;
-        }
-      } catch {
-        // A defect here must never escape into the host page's own
-        // mutation/render cycle — skip this batch, the next mutation gets
-        // another chance (Constitution Principle V).
-      }
-    }
-
-    const observer = new MutationObserver(remapCurrentElements);
-    observer.observe(root, { childList: true, subtree: true });
-
     function disconnectIfAllResolved(): void {
       if (trackedSlots.every((slot) => slot.resolved)) {
         observer.disconnect();
       }
     }
 
+    function processMutationBatch(): void {
+      try {
+        const currentByPosition = mapSlotsByGroupPosition(root);
+        for (const slot of trackedSlots) {
+          if (slot.resolved) {
+            continue;
+          }
+
+          if (!slot.renderedElement) {
+            // Not yet rendered: just keep currentElement pointed at whatever
+            // currently occupies this slot's group position (FR-001/FR-002).
+            slot.currentElement = currentByPosition.get(`${slot.groupKey}#${slot.groupPosition}`) ?? null;
+            continue;
+          }
+
+          // Rendered, watching for FR-009 (removal) or settling (FR-008).
+          if (slot.renderedElement.isConnected) {
+            slot.quietBatchesRemaining -= 1;
+            if (slot.quietBatchesRemaining <= 0) {
+              slot.resolved = true;
+            }
+            continue;
+          }
+
+          const current = currentByPosition.get(`${slot.groupKey}#${slot.groupPosition}`) ?? null;
+          slot.currentElement = current;
+          if (!current || slot.redisplaysRemaining <= 0) {
+            // Genuinely gone, or the redisplay budget is exhausted — leave
+            // the slot in whatever state it last reached (FR-010).
+            slot.resolved = true;
+            continue;
+          }
+
+          // Redisplay the same, already-fetched ad — never a second request
+          // (research.md).
+          renderer.renderAd(current, slot.ad as AdCandidate);
+          slot.renderedElement = current;
+          slot.redisplaysRemaining -= 1;
+          slot.quietBatchesRemaining = INITIAL_QUIET_BATCHES_REMAINING;
+        }
+      } catch {
+        // A defect here must never escape into the host page's own
+        // mutation/render cycle — skip this batch, the next mutation gets
+        // another chance (Constitution Principle V).
+      }
+      disconnectIfAllResolved();
+    }
+
+    const observer = new MutationObserver(processMutationBatch);
+    observer.observe(root, { childList: true, subtree: true });
+
     // Deliberately not awaited in the loop: each slot's pipeline starts
     // immediately and independently, so one slot's latency or failure can
     // never delay or affect another (FR-006/FR-007, feature 001).
     for (const slot of trackedSlots) {
-      runSlot(slot)
-        .catch(() => {
-          // A slot that fails for any unexpected reason simply stays empty
-          // — never let it escape to the host page (Constitution Principle V).
-        })
-        .finally(disconnectIfAllResolved);
+      runSlot(slot).finally(disconnectIfAllResolved);
     }
   }
 

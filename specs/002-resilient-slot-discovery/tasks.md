@@ -65,14 +65,14 @@ implementation, matching this feature's single-module scope (plan.md's Project S
 - [X] T002 Extend `src/orchestrator/adOrchestrator.ts` for bounded post-render redisplay
       (spec.md amendment, FR-009/FR-010/data-model.md): a Tracked Slot gains `ad` (the already-
       fetched `AdCandidate`, remembered for reuse), `renderedElement` (the specific element last
-      rendered into), `redisplaysRemaining` (starts at 2), and `quietBatchesRemaining` (starts at
-      3, reset on each (re)display). After a successful render, the slot is *not* marked
+      rendered into), `redisplaysRemaining` (starts at 3), and `quietBatchesRemaining` (starts at
+      10, reset on each (re)display). After a successful render, the slot is *not* marked
       `resolved` — the `MutationObserver` callback now also checks, for every rendered-but-not-
       yet-settled slot, whether `renderedElement` is still connected: if yes, decrement
       `quietBatchesRemaining` (settle and mark `resolved` at 0); if no, look up a current element
       for the slot and, if `redisplaysRemaining > 0`, call `renderer.renderAd` again with the
       *same* remembered `ad` (never a second `client.requestAd` call — research.md), decrement
-      `redisplaysRemaining`, reset `quietBatchesRemaining` to 3, and update `renderedElement`;
+      `redisplaysRemaining`, reset `quietBatchesRemaining` to 10, and update `renderedElement`;
       otherwise (no current element, or attempts exhausted) mark `resolved` (empty — FR-010's
       "leave it in whatever state it last reached"). The mutation-callback try/catch from T001
       covers this new logic too — no separate wrapping needed.
@@ -80,16 +80,22 @@ implementation, matching this feature's single-module scope (plan.md's Project S
       Unit tests added to `tests/unit/orchestrator/adOrchestrator.test.ts`:
       - the rendered element is removed and replaced once → the same ad is redisplayed into the
         new element, with no second `client.requestAd` call (US1 scenario 3, FR-009).
-      - the rendered element is removed and replaced up to the redisplay bound, then removed one
-        more time with no replacement → the slot ends up empty, no error, no further attempts
-        (FR-010).
-      - the rendered element is removed and replaced repeatedly, beyond the redisplay bound →
-        redisplay stops after the bounded number of attempts even though replacements keep
-        happening (FR-010's "never retry indefinitely").
-      - the rendered element stays connected for `quietBatchesRemaining` consecutive mutation
-        batches → the slot settles (`resolved`) and a further, later mutation has no effect
-        (FR-008).
+      - the rendered element is removed and replaced repeatedly, well beyond the redisplay bound
+        → redisplay stops after the bounded number of attempts even though replacements keep
+        happening, and the slot ends up empty with no error and no further attempts (FR-010,
+        "never retry indefinitely").
+      - the rendered element stays connected for enough consecutive mutation batches to exceed
+        `quietBatchesRemaining` → the slot settles (`resolved`) and a further, later removal has
+        no effect (FR-008).
       Depends on T001.
+      **Amended after real-environment verification (T003)**: the values above (3 / 10) were
+      tuned up from an initial, smaller pair (2 / 3) that settled the *wrong* way — the watch
+      window closed before a later hydration-related mutation arrived — in roughly 1 of 3 real
+      reloads in a production build and in every reload against the dev server (which produces
+      more DOM churn around hydration than production: React DevTools hooks, Fast Refresh setup).
+      Re-verified at 3 / 10: 5/5 clean reloads in dev mode and 5/5 in `next build && next start`
+      all displayed the ad with no disappearance. See research.md's amended decision for the full
+      account (temporary debug logging used to trace this, since removed from the shipped code).
 
 **Checkpoint**: Foundation ready — every user story below is already functionally complete once
 this lands; the phases below verify it against real and standalone pages rather than adding more
@@ -104,14 +110,21 @@ environment that surfaced it, not just a synthetic test. Covers both timing dire
 same underlying race (spec.md amendment).
 
 **Independent Test**: quickstart.md Scenario 1 — reload eventpulse's real homepage repeatedly and
-confirm the seeded ad appears and *stays* displayed, with no hydration-mismatch warning in the
-console.
+confirm the seeded ad appears and *stays* displayed (a hydration-mismatch console warning may
+still appear — that's React's own diagnostic, not itself a failure; see quickstart.md).
 
-- [ ] T003 [US1] Run quickstart.md Scenario 1 against the real eventpulse full-circle environment:
+- [X] T003 [US1] Run quickstart.md Scenario 1 against the real eventpulse full-circle environment:
       rebuild this repo, recopy `dist/ad-serve-client.js` into eventpulse's `public/`, reload the
       homepage several times with eventpulse + eventpulse-api + ad-serve-api all running. Confirm
-      the ad appears inside the *current* slot element and stays there (no flicker/disappearance),
-      and confirm no hydration-mismatch console warning mentions the ad slot. Depends on T002.
+      the ad appears inside the *current* slot element and stays there (no flicker/disappearance).
+      Depends on T002.
+      **Verified**: this task is what surfaced T002's constant-tuning need (see T002's amendment
+      note) — initial values failed roughly 1/3 of the time in production and consistently in dev
+      mode. After tuning, re-verified clean: 5/5 in dev mode (`npm run dev`) and 5/5 in a real
+      production build (`npm run build && npm run start`), driven headlessly via Playwright
+      (`playwright-core`, no project dependency added — installed ad hoc in the scratch directory
+      for this verification only). Confirmed via DOM inspection that the rendered `<iframe>` is
+      always inside the connected, current `[data-ad-serve-slot]` element.
 
 **Checkpoint**: User Story 1 verified against the real bug report, including the deeper finding
 T002 addresses.

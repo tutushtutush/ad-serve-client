@@ -354,4 +354,107 @@ describe("createAdOrchestrator.run", () => {
     expect(renderedElement).toBe(replacement); // reference check — see note above
     expect(renderedElement).not.toBe(el);
   });
+
+  // --- 002-resilient-slot-discovery amendment: post-render redisplay ---
+
+  it("redisplays the same ad when the rendered element is removed and replaced (FR-009)", async () => {
+    const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    document.body.innerHTML = "";
+    document.body.append(el);
+
+    const client: AdDecisionClientLike = {
+      requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
+    };
+    const renderer: AdRendererLike = { renderAd: jest.fn() };
+    const orchestrator = createAdOrchestrator({ client, renderer });
+
+    orchestrator.run(document);
+    await flushMicrotasks(); // initial render
+
+    expect(renderer.renderAd).toHaveBeenCalledTimes(1);
+    const [firstRenderedElement] = (renderer.renderAd as jest.Mock).mock.calls[0];
+
+    // Simulate hydration's mismatch-recovery: the element we rendered into
+    // is discarded and replaced with a fresh one bearing the same config.
+    const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    (firstRenderedElement as Element).replaceWith(replacement);
+    await flushMicrotasks();
+
+    expect(client.requestAd).toHaveBeenCalledTimes(1); // no second request
+    expect(renderer.renderAd).toHaveBeenCalledTimes(2);
+    const [secondRenderedElement, secondAd] = (renderer.renderAd as jest.Mock).mock.calls[1];
+    expect(secondRenderedElement).toBe(replacement);
+    expect(secondAd).toBe(ad); // same ad object — reused, not re-fetched
+  });
+
+  it("stops redisplaying after a bounded number of attempts, even under continuous removal (FR-010)", async () => {
+    let current = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    document.body.innerHTML = "";
+    document.body.append(current);
+
+    const client: AdDecisionClientLike = {
+      requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
+    };
+    const renderer: AdRendererLike = { renderAd: jest.fn() };
+    const orchestrator = createAdOrchestrator({ client, renderer });
+
+    orchestrator.run(document);
+    await flushMicrotasks(); // initial render (attempt 1)
+
+    // Keep replacing the rendered element well beyond any reasonable budget.
+    const replacements = 10;
+    for (let i = 0; i < replacements; i++) {
+      const next = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      current.replaceWith(next);
+      current = next;
+      await flushMicrotasks();
+    }
+
+    expect(client.requestAd).toHaveBeenCalledTimes(1); // still only ever one request
+    // Exactly one initial render plus a small, bounded number of redisplays
+    // — not one render per replacement (which would mean no bound at all).
+    const totalRenders = (renderer.renderAd as jest.Mock).mock.calls.length;
+    expect(totalRenders).toBeGreaterThan(1);
+    expect(totalRenders).toBeLessThan(replacements);
+
+    // Further replacement after the budget is exhausted must not add more.
+    const afterBudget = totalRenders;
+    const next = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    current.replaceWith(next);
+    await flushMicrotasks();
+    expect(renderer.renderAd).toHaveBeenCalledTimes(afterBudget);
+  });
+
+  it("settles after surviving enough consecutive quiet mutations, and a later removal has no further effect (FR-008)", async () => {
+    const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    document.body.innerHTML = "";
+    document.body.append(el);
+
+    const client: AdDecisionClientLike = {
+      requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
+    };
+    const renderer: AdRendererLike = { renderAd: jest.fn() };
+    const orchestrator = createAdOrchestrator({ client, renderer });
+
+    orchestrator.run(document);
+    await flushMicrotasks(); // initial render
+
+    expect(renderer.renderAd).toHaveBeenCalledTimes(1);
+
+    // Several unrelated, "quiet" mutation batches — the rendered element
+    // stays connected throughout, so the slot eventually settles. Comfortably
+    // more than the settle bound so the slot is definitely settled before
+    // the removal below (not incidentally passing because it's still mid-watch).
+    for (let i = 0; i < 15; i++) {
+      document.body.append(document.createElement("span"));
+      await flushMicrotasks();
+    }
+
+    // Now that it should have settled, removing the rendered element must
+    // NOT trigger a redisplay — watching has already stopped (FR-008).
+    el.remove();
+    await flushMicrotasks();
+
+    expect(renderer.renderAd).toHaveBeenCalledTimes(1);
+  });
 });

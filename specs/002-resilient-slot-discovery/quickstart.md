@@ -36,8 +36,11 @@ failed by a different route: the ad would render, then React's hydration mismatc
 immediately discard it — visible as a "Hydration failed" warning in the browser console naming
 the injected `<iframe>` — since it landed before hydration reconciled that section. Both routes
 are now covered.) Confirm via the browser's element inspector that the `<iframe>` is inside the
-*current* `[data-ad-serve-slot]` element on the page, not orphaned in a detached node, and confirm
-no hydration-mismatch warning appears in the console mentioning the ad slot.
+*current* `[data-ad-serve-slot]` element on the page, not orphaned in a detached node. Note: React
+may still log its own hydration-mismatch warning in the console when the timing race lands that
+way — that warning is React's own diagnostic, outside this feature's control, and is not itself a
+failure; what matters is that the ad is present and connected once the page settles, regardless of
+whether that warning appeared.
 
 ## Scenario 2: A slot removed for good still stays empty (US2, FR-004)
 

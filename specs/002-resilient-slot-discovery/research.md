@@ -133,21 +133,31 @@ literal wording was written for the pre-render case.
 watching to eventually stop even if the ad is never removed at all (otherwise a slot whose ad
 survives cleanly would be watched for the rest of the page's life). Two small counters, both
 reset on the *first* successful render, cover both:
-- `redisplaysRemaining` (starts at 2, allowing up to 3 total displays — original + 2 retries):
+- `redisplaysRemaining` (starts at 3, allowing up to 4 total displays — original + 3 retries):
   decremented only when a redisplay actually happens (`renderedElement` was found disconnected
   and a current element exists to redisplay into). When it reaches 0 and another removal is
   detected, the slot is done (left empty, per FR-010's "leave the slot in whatever state it last
   reached").
-- `quietBatchesRemaining` (starts at 3, reset to 3 every time a (re)display happens): decremented
-  on every mutation batch observed where the rendered element was found *still connected* (no
-  redisplay needed). When it reaches 0, the slot is considered settled and watching stops — this
-  is the "stop even if never removed" bound FR-008 needs.
-Both are counted in discrete units (attempts, batches) rather than milliseconds, consistent with
-spec.md's Assumptions: hydration timing varies by page complexity and device performance, but the
-*number* of mutation batches and redisplay attempts a one-time hydration event plausibly produces
-does not — the values above comfortably cover what was observed (a single hydration replace, and
-— separately — React Strict Mode's dev-only double-invocation, which could plausibly double
-whatever this produces) with headroom, without guessing a duration.
+- `quietBatchesRemaining` (starts at 10, reset to 10 every time a (re)display happens):
+  decremented on every mutation batch observed where the rendered element was found *still
+  connected* (no redisplay needed). When it reaches 0, the slot is considered settled and
+  watching stops — this is the "stop even if never removed" bound FR-008 needs.
+
+**Values tuned against the real eventpulse environment, not guessed once and left**: an initial,
+smaller pair (2 redisplays / 3 quiet batches) was tried first and settled the *wrong* way in
+roughly 1 of every 3 real reloads (production build) and every reload in dev mode — the settle
+window closed before a later hydration-related mutation arrived, so the ad's disappearance went
+undetected. Tracing it live (temporary logging, since removed) showed dev mode in particular
+produces more DOM churn around hydration than production does (React DevTools hooks, Fast
+Refresh setup) — consistent with a small fixed batch count being too tight a margin. The current
+values (3 / 10) were re-verified: 5/5 clean reloads in dev mode and 5/5 in a production build
+(`next build && next start`) all displayed the ad with no disappearance.
+
+Both bounds are counted in discrete units (attempts, batches) rather than milliseconds,
+consistent with spec.md's Assumptions: hydration timing varies by page complexity and device
+performance, but the *number* of mutation batches and redisplay attempts a one-time hydration
+event plausibly produces is far more stable — the retuned values comfortably cover what was
+empirically observed, with headroom, without guessing a duration.
 
 **Alternatives considered**: A single combined counter instead of two — rejected; conflating
 "how many times did we retry" with "how long have we watched without incident" would either cut
