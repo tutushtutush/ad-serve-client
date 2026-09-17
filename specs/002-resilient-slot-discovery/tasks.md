@@ -35,7 +35,7 @@ existing test file.
 **Purpose**: The one change every user story depends on — there is no separate per-story
 implementation, matching this feature's single-module scope (plan.md's Project Structure).
 
-- [ ] T001 Rewrite discovery/tracking in `src/orchestrator/adOrchestrator.ts`: introduce a
+- [X] T001 Rewrite discovery/tracking in `src/orchestrator/adOrchestrator.ts`: introduce a
       **Tracked Slot** record (`config`, `groupPosition`, `currentElement`, `resolved` —
       data-model.md) computed by grouping discovered elements by
       `(platformId, adTypeId, country, deviceType)` in document order (research.md); replace the
@@ -87,8 +87,31 @@ appears, where it previously silently failed to.
       homepage with eventpulse + eventpulse-api + ad-serve-api all running. Confirm the ad appears
       inside the *current* slot element (inspect that it's connected, not a leftover detached
       node). Depends on T001.
+      **Blocked, then partially resolved — two distinct findings surfaced by this task:**
+      1. **Unrelated bug, fixed**: T001's build never actually got far enough to test the new
+         tracking logic — `isAdCandidate` (from feature 001's PR #1 code-review fix) requires
+         every `AdCreative` field to be present, but ad-serve-api's real response only includes
+         fields a campaign actually set (`headline`/`ctaText`/`linkUrl`/`altText` — 4 of 13),
+         omitting the rest entirely rather than backfilling defaults. This silently rejected a
+         perfectly valid ad as malformed. Fixed by making `AdCreative`'s fields optional
+         (types.ts) and moving per-field safety from the Client's validation (now just checks
+         `creative` is a plausible object, matching the "genuinely opaque" contract) to the
+         Renderer, which now coerces each field it actually uses to a safe string before escaping
+         (`asSafeString`), fixing the *original* PR #1 crash risk at the point it actually
+         matters rather than over-fitting the Client to an assumed-complete shape.
+      2. **New, deeper finding — not yet resolved, see conversation**: with (1) fixed, the ad
+         *does* render into the original slot element (confirmed via React's own hydration-
+         mismatch console error, which names our injected `<iframe>` as the extraneous node) —
+         but React then discards/regenerates that subtree to resolve the mismatch, *removing* the
+         ad immediately after. This is the *inverse* timing case from the one this feature
+         targets: our render happens fast enough (sub-ms local ad-serve-api) to *beat* hydration,
+         and hydration's own mismatch-recovery is what removes it afterward — not a replacement
+         *before* render, which is what T001 fixes. spec.md's Assumptions explicitly scope
+         "removed/replaced after an ad already rendered" as a separate, out-of-scope concern; this
+         is that exact case, now shown to be the actual dominant failure mode against a fast
+         backend, not an edge case. Paused here pending a decision on how to proceed.
 
-**Checkpoint**: User Story 1 verified against the real bug report.
+**Checkpoint**: User Story 1 partially verified — see the unresolved finding above.
 
 ---
 
