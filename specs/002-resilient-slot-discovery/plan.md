@@ -16,8 +16,17 @@ resolves, it renders into whatever element is *currently* mapped to that Tracked
 element captured at request time; if no element is currently mapped (the slot was removed for
 good), it resolves to empty exactly as before. No new timeout is introduced — "removed for good"
 is determined by the same per-request timeout bound already in place from the foundational
-feature. Once a slot's outcome is determined, its record is dropped and the observer stops
-watching for it (FR-008), so a fully-resolved page's observer eventually disconnects entirely.
+feature.
+
+**Amended**: real-world verification (spec.md's Assumptions) showed a render can itself be undone
+shortly afterward by the host page's own redraw (React hydration's mismatch-recovery discarding
+the subtree it landed in). A render is therefore no longer immediately final: the Tracked Slot
+keeps watching for a bounded window (`redisplaysRemaining`, `quietBatchesRemaining` —
+data-model.md) and redisplays the *same*, already-fetched ad (never a second request) if the
+rendered element is found disconnected, up to a small bounded number of attempts, before finally
+giving up. Once a slot's outcome is *finally* determined (empty, or filled-and-settled), its
+record is dropped and the observer stops watching for it (FR-008), so a fully-resolved page's
+observer eventually disconnects entirely.
 
 ## Technical Context
 
@@ -60,10 +69,13 @@ contracts are introduced by this feature.
 - **I. Clean, Readable Code**: ESLint + `tsc --noEmit` gate every change, unchanged. PASS.
 - **II. Layered Architecture**: Continuous discovery and Tracked Slot bookkeeping stay entirely
   within the Orchestrator — it already owns "discover slots" and "decide what to request and
-  when" per Principle II; watching for a slot's element to reappear is a direct extension of that
-  responsibility, not a new layer. The Client and Renderer are untouched: the Orchestrator still
-  calls the Client exactly once per slot (FR-002 — a replacement never triggers a second request)
-  and still calls the Renderer exactly once per slot when it resolves filled (FR-005). PASS.
+  when" per Principle II; watching for a slot's element to reappear (and, after the amendment,
+  redisplaying if it's removed) is a direct extension of that responsibility, not a new layer.
+  The Client and Renderer are untouched: the Orchestrator still calls the Client at most once per
+  slot (FR-002/research.md — a replacement or redisplay never triggers a second request) and
+  calls the Renderer's existing `renderAd` again, unchanged, for a redisplay (FR-009) — the
+  Renderer itself has no new concept of "redisplay," it just paints whatever element/ad pair it's
+  given, exactly as before. PASS.
 - **III. Testable Layers via Dependency Injection**: `run(root)` already takes its DOM root as an
   injected parameter (feature 001); this feature adds no new global reached for directly —
   `MutationObserver` is constructed against that same injected `root`, the same way `adRenderer`

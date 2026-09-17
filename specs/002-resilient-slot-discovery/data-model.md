@@ -10,12 +10,16 @@ Replaces feature 001's implicit "hold the `Element` reference for the life of th
 approach. One Tracked Slot exists per slot discovered, for as long as that slot's outcome is
 undetermined.
 
-| Field           | Type                          | Notes                                                |
-|-----------------|--------------------------------|-------------------------------------------------------|
-| `config`        | `AdDecisionRequest`            | The slot's platform/ad-type/targeting, fixed at discovery — used both for the outbound request and as the grouping key (research.md) |
-| `groupPosition` | integer                        | This slot's position (0-based) among all discovered slots sharing the same `config`, fixed at discovery |
-| `currentElement`| `Element \| null`              | Re-resolved on every observed mutation (data-model "State Transitions" below); `null` means no element currently occupies this slot's `(config, groupPosition)` |
-| `resolved`      | boolean                        | Set once an outcome (filled-and-rendered, or empty) is reached; once `true`, this Tracked Slot is dropped and no longer updated (FR-008) |
+| Field                    | Type                | Notes                                                |
+|--------------------------|----------------------|-------------------------------------------------------|
+| `config`                 | `AdDecisionRequest`  | The slot's platform/ad-type/targeting, fixed at discovery — used both for the outbound request and as the grouping key (research.md) |
+| `groupPosition`          | integer               | This slot's position (0-based) among all discovered slots sharing the same `config`, fixed at discovery |
+| `currentElement`         | `Element \| null`     | Re-resolved on every observed mutation (data-model "State Transitions" below); `null` means no element currently occupies this slot's `(config, groupPosition)` |
+| `ad`                     | `AdCandidate \| null` | **Amended.** Set once the ad decision arrives filled; remembered so a redisplay (FR-009) reuses the same ad rather than requesting again (research.md) |
+| `renderedElement`        | `Element \| null`     | **Amended.** The specific element last rendered into; checked each mutation batch for disconnection to detect the FR-009 case |
+| `redisplaysRemaining`    | integer               | **Amended.** Starts at 2 on first successful render; decremented each time a redisplay actually happens (FR-010) |
+| `quietBatchesRemaining`  | integer               | **Amended.** Starts at 3 on every (re)display, reset on each redisplay; decremented each mutation batch where `renderedElement` was still connected — reaching 0 means "settled," done |
+| `resolved`               | boolean               | Set once an outcome is *finally* determined (empty, or filled-and-survived-the-watch-window); once `true`, this Tracked Slot is dropped and no longer updated (FR-008) |
 
 ## Configuration Group (internal, derived — not persisted)
 
@@ -26,9 +30,11 @@ all currently-discovered elements sharing an identical `config`, ordered by docu
 
 ## State Transitions
 
-A Tracked Slot's `currentElement` can change any number of times before resolution; the Tracked
-Slot itself moves through the same overall outcomes as feature 001's per-slot state machine, with
-one addition (the *watching* state, replacing feature 001's single-shot discovery moment):
+**Amended**: the original diagram ended at the first successful render (`filled [resolved]`).
+Real-world verification showed a render can be undone by the host page's own redraw shortly
+afterward (spec.md's Assumptions), so `filled` is no longer immediately final — a bounded
+watch-and-redisplay window (FR-009/FR-010) sits between a render and the slot actually being
+done:
 
 ```text
 discovered → (invalid config) ──────────────────────────────────► empty [resolved]
@@ -48,14 +54,31 @@ discovered → (invalid config) ────────────────
      │   removed for good, FR-004)
      │
      ▼ currentElement is set
-  filled [resolved] (rendered into currentElement, whichever element that
-                      currently is — not necessarily the one seen at
-                      discovery time)
+  rendered (renderedElement := currentElement, ad := result.ad,
+            redisplaysRemaining := 2, quietBatchesRemaining := 3)
+     │
+     │ ◄── loop: on each subsequent mutation batch ──────────────────────┐
+     │                                                                    │
+     ├─ renderedElement still connected                                  │
+     │    quietBatchesRemaining -= 1                                     │
+     │    ├─ > 0 ────────────────────────────────────────────────────────┘
+     │    └─ = 0 ──────────────────────────────────────────► filled [resolved]
+     │              (settled — ad survived the watch window)
+     │
+     └─ renderedElement disconnected (FR-009 case)
+          ├─ no current element for this slot ────────────► empty [resolved]
+          │    (genuinely gone — FR-004's outcome applies here too)
+          ├─ redisplaysRemaining = 0 ─────────────────────► empty [resolved]
+          │    (bounded attempts exhausted — FR-010; "leave it in whatever
+          │     state it last reached" — here, that state is empty)
+          └─ redisplaysRemaining > 0 ──► redisplay into the current element
+                    (renderedElement := that element, redisplaysRemaining -= 1,
+                     quietBatchesRemaining reset to 3) ──► back to the loop above
 ```
 
 Unlike feature 001, `currentElement` reassignment itself is not a state transition that produces
-a visible outcome — it's bookkeeping that happens while the Tracked Slot is still in the
-`requesting`/`checking-current-element` window. Once `resolved` becomes `true`, no further
+a visible outcome — it's bookkeeping that happens throughout. Once `resolved` becomes `true`
+(reached either directly, or after the watch-and-redisplay loop above concludes), no further
 mutation observation affects that slot (FR-008).
 
 ## Relationships

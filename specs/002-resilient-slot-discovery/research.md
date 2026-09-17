@@ -4,6 +4,11 @@ The constitution and feature 001's existing design already settled the layering 
 owns discovery) and the fail-silent requirement. The research below covers the concrete
 mechanism for continuous discovery and cross-replacement slot identity.
 
+**Amendment (post-implementation)**: real-world verification against eventpulse revealed a
+second failure mode beyond the original replace-before-render case — see the "Bounded
+post-render watch" decisions near the end of this document, added once that verification
+surfaced it (spec.md's Assumptions has the full account).
+
 ## Decision: `MutationObserver` watching the injected root, not polling
 
 **Rationale**: The bug this feature fixes (research from the real eventpulse test) is a DOM
@@ -64,17 +69,19 @@ existing multi-second request bound.
 
 ## Decision: Tracked Slots are dropped (and the observer eventually disconnects) once resolved
 
-**Rationale**: FR-008 requires the system to stop tracking a slot once its outcome is determined.
-Beyond correctness, this bounds the observer's own cost (Technical Context's performance goal):
-once every Tracked Slot for a page has resolved (filled-and-rendered, or empty), there is nothing
-left to re-map on future mutations, so the observer calls `disconnect()` and the page pays zero
-ongoing cost from this feature for the rest of its lifetime.
+**Rationale**: FR-008 requires the system to stop tracking a slot once its outcome is *finally*
+determined — which, after the amendment below, includes surviving the bounded post-render watch
+window (FR-009/FR-010), not just the original request settling. Beyond correctness, this bounds
+the observer's own cost (Technical Context's performance goal): once every Tracked Slot for a
+page is done, there is nothing left to re-map on future mutations, so the observer calls
+`disconnect()` and the page pays zero ongoing cost from this feature for the rest of its
+lifetime.
 
-**Alternatives considered**: Leaving the observer permanently attached "just in case" (e.g., to
-support a slot reappearing long after resolving) — rejected, out of scope per spec.md's
-Assumptions (a slot's element changing *after* its ad already rendered is explicitly a separate
-concern), and it would leave a live observer running for the entire page lifetime for no
-benefit this feature asks for.
+**Alternatives considered**: Leaving the observer permanently attached for the life of the page
+"just in case" — rejected even after the amendment below extended watching past the first
+successful render: an *unbounded* watch is still unnecessary cost once the bounded window
+(designed specifically to cover one-time hydration settling) has passed, per the new decisions
+below.
 
 ## Decision: Wrap the `MutationObserver` callback the same way the per-slot pipeline is wrapped
 
@@ -89,3 +96,63 @@ exception surfacing from inside the host page's own render/commit cycle.
 **Alternatives considered**: Relying on the existing per-slot `.catch()` alone — rejected, that
 only guards each slot's `requestAd`/`renderAd` promise chain, not the separate, synchronous
 mutation-callback code path this feature adds.
+
+## Decision: Redisplay is triggered by the rendered element becoming disconnected, not by a generic "something changed" signal
+
+**Rationale**: Real-world verification (spec.md's Assumptions) showed our render can land inside
+a React-hydrated subtree *before* hydration reconciles it, and hydration's own mismatch-recovery
+then discards/regenerates that subtree — removing our `<iframe>` along with it. The precise,
+correct signal that this happened (as opposed to some unrelated mutation elsewhere on the page)
+is that the *specific element we rendered into* (`renderedElement`, a new Tracked Slot field) is
+no longer connected to the document. Checking this on every mutation batch, rather than
+re-running the full request/render pipeline speculatively, keeps the redisplay path cheap and
+precisely scoped to the one condition FR-009 describes.
+
+**Alternatives considered**: Treating *any* mutation after a successful render as a reason to
+double-check — unnecessary; `renderedElement.isConnected` is a direct, O(1) check that already
+answers the only question that matters ("is my ad still there?"), without needing to re-run the
+group-position re-mapping unless that check actually fails.
+
+## Decision: Redisplay uses the already-fetched ad, never a second request
+
+**Rationale**: FR-002/FR-005 (feature 001 and this feature's original scope) already establish
+that a slot gets exactly one `client.requestAd` call, regardless of how many times its element
+changes. Redisplay per FR-009 is a continuation of that same rule: the Tracked Slot keeps the
+`AdCandidate` it already received and simply calls `renderer.renderAd` again with the current
+element — no new network request, no new ad decision. This also sidesteps a real correctness
+trap: a second request could return a *different* winning ad (campaigns are ranked dynamically),
+which would mean the visitor briefly saw one ad, then a different one — confusing and not what
+FR-005 ("never more than one ad... rendered") is protecting against in spirit, even though its
+literal wording was written for the pre-render case.
+
+**Alternatives considered**: Re-requesting on redisplay — rejected for the reasons above.
+
+## Decision: Bounded redisplay attempts and a bounded post-render observation window, both counted in discrete events, not wall-clock time
+
+**Rationale**: FR-010 requires a bounded number of redisplay attempts, and FR-008 requires
+watching to eventually stop even if the ad is never removed at all (otherwise a slot whose ad
+survives cleanly would be watched for the rest of the page's life). Two small counters, both
+reset on the *first* successful render, cover both:
+- `redisplaysRemaining` (starts at 2, allowing up to 3 total displays — original + 2 retries):
+  decremented only when a redisplay actually happens (`renderedElement` was found disconnected
+  and a current element exists to redisplay into). When it reaches 0 and another removal is
+  detected, the slot is done (left empty, per FR-010's "leave the slot in whatever state it last
+  reached").
+- `quietBatchesRemaining` (starts at 3, reset to 3 every time a (re)display happens): decremented
+  on every mutation batch observed where the rendered element was found *still connected* (no
+  redisplay needed). When it reaches 0, the slot is considered settled and watching stops — this
+  is the "stop even if never removed" bound FR-008 needs.
+Both are counted in discrete units (attempts, batches) rather than milliseconds, consistent with
+spec.md's Assumptions: hydration timing varies by page complexity and device performance, but the
+*number* of mutation batches and redisplay attempts a one-time hydration event plausibly produces
+does not — the values above comfortably cover what was observed (a single hydration replace, and
+— separately — React Strict Mode's dev-only double-invocation, which could plausibly double
+whatever this produces) with headroom, without guessing a duration.
+
+**Alternatives considered**: A single combined counter instead of two — rejected; conflating
+"how many times did we retry" with "how long have we watched without incident" would either cut
+off legitimate retries too early (if a quiet batch also consumed retry budget) or let a
+never-removed slot get watched far longer than necessary (if only retries consumed budget). A
+wall-clock timeout instead of batch counting — rejected per spec.md's Assumptions: duration is
+unpredictable across page complexity/device performance in a way that discrete event counts
+aren't.
