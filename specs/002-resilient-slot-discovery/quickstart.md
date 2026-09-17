@@ -77,17 +77,18 @@ functions normally.
 
 ## Scenario 3: Two replacements before resolution still show exactly one ad (US3, FR-005)
 
-Same test page as Scenario 1's slot, but instead of removing the container, replace it twice in
-quick succession with structurally identical containers holding a fresh slot element with the
-same configuration:
+Same test page as Scenario 1's slot, but replace the slot element itself twice in quick
+succession with a fresh, empty element bearing the same configuration:
 
 ```html
 <script>
+  // Shallow clone (false): a fresh, empty slot with the same config — never
+  // carries over an iframe that may already have rendered into the slot
+  // being replaced (ad-serve-api can resolve fast enough that this race is
+  // real, not just theoretical — a deep clone would duplicate it instead).
   function replaceSlot() {
-    const container = document.getElementById("container");
-    const fresh = container.cloneNode(true);
-    container.replaceWith(fresh);
-    fresh.id = "container";
+    const slot = document.querySelector("[data-ad-serve-slot]");
+    slot.replaceWith(slot.cloneNode(false));
   }
   setTimeout(replaceSlot, 10);
   setTimeout(replaceSlot, 20);
@@ -119,10 +120,8 @@ the *second* slot's element is replaced:
 </div>
 <script>
   setTimeout(() => {
-    const c = document.getElementById("slot-b-container");
-    const fresh = c.cloneNode(true);
-    c.replaceWith(fresh);
-    fresh.id = "slot-b-container";
+    const slotB = document.querySelector("#slot-b-container [data-ad-serve-slot]");
+    slotB.replaceWith(slotB.cloneNode(false)); // shallow — see Scenario 3's note
   }, 10);
 </script>
 ```

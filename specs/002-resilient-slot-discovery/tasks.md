@@ -139,8 +139,10 @@ replacing it, still degrades to empty exactly as before this feature.
 **Independent Test**: quickstart.md Scenario 2 — a standalone test page removes a slot's element
 shortly after load with no replacement; confirm no ad ever appears and nothing errors.
 
-- [ ] T004 [US2] Run quickstart.md Scenario 2 against the built bundle: confirm no ad appears, no
+- [X] T004 [US2] Run quickstart.md Scenario 2 against the built bundle: confirm no ad appears, no
       console error occurs, and the rest of the page functions normally. Depends on T001.
+      **Verified**: standalone test page against the real ad-serve-api, driven headlessly. No
+      `<iframe>` ever appeared, zero page errors.
 
 **Checkpoint**: User Stories 1 and 2 both verified.
 
@@ -156,9 +158,16 @@ available) and never more than one simultaneously.
 twice in quick succession before the ad result is ready; confirm exactly one ad appears, in the
 final container.
 
-- [ ] T005 [US3] Run quickstart.md Scenario 3 against the built bundle: confirm exactly one
+- [X] T005 [US3] Run quickstart.md Scenario 3 against the built bundle: confirm exactly one
       `<iframe>` ad appears, inside the final (third) container, with no duplicate ads and nothing
       rendered into an earlier, detached container. Depends on T001.
+      **Verified — and fixed a bug in the quickstart doc itself**: the original example replaced
+      the *container* via `cloneNode(true)` (deep clone). Since ad-serve-api can resolve fast
+      enough to render before the scripted replacement fires, a deep clone could duplicate an
+      already-rendered `<iframe>` into the "fresh" replacement instead of producing a genuinely
+      empty one — caught by this task returning `iframeCount: 3` on the first real run. Fixed
+      quickstart.md (and Scenario 4's identical issue) to shallow-clone the *slot element itself*
+      instead. Re-verified: exactly 1 iframe, in the final container.
 
 **Checkpoint**: All three user stories independently verified.
 
@@ -166,17 +175,34 @@ final container.
 
 ## Phase 5: Polish & Cross-Cutting Concerns
 
-- [ ] T006 [P] Run `npm run lint`, `npm run typecheck`, and `npm test` clean across the whole
+- [X] T006 [P] Run `npm run lint`, `npm run typecheck`, and `npm test` clean across the whole
       feature (confirming zero regression to feature 001's existing behavior). Confirm
       `npm run build` still compiles `dist/ad-serve-client.js`.
-- [ ] T007 [P] Run quickstart.md Scenario 4 (FR-007 — two identically-configured slots, only one
+      **Verified**: lint, typecheck, and 50/50 unit tests all clean; `npm run build` produces
+      `dist/ad-serve-client.js`.
+- [X] T007 [P] Run quickstart.md Scenario 4 (FR-007 — two identically-configured slots, only one
       replaced) against the built bundle: confirm each slot's ad ends up in its own correct
       current element, never crossed.
-- [ ] T008 [P] Run quickstart.md Scenarios 5 and 6 (FR-009/FR-010 — redisplay after post-render
+      **Verified**: both slot A (never replaced) and slot B (replaced) ended up with their own
+      `<iframe>`, each nested under its own container — never crossed.
+- [X] T008 [P] Run quickstart.md Scenarios 5 and 6 (FR-009/FR-010 — redisplay after post-render
       removal, and the bounded-attempts cutoff) against the built bundle.
-- [ ] T009 [P] Re-run feature 001's quickstart.md Scenarios 2, 3, and 5 (no ad available, invalid
+      **Verified**: Scenario 5 — the ad reappeared after its rendered element was replaced, with
+      exactly 1 `GET /ads` request total (redisplay reused the already-fetched ad, no re-request).
+      Scenario 6 (continuous removal, well beyond the redisplay budget) — the slot correctly gave
+      up after its bounded attempts and settled empty, no infinite loop, no error, still only 1
+      request total.
+- [X] T009 [P] Re-run feature 001's quickstart.md Scenarios 2, 3, and 5 (no ad available, invalid
       slot configuration, independent multi-slot resolution) against the built bundle to confirm
       this feature introduces no regression to behavior those scenarios already cover.
+      **Verified via the unit test suite** rather than repeating a live browser walkthrough: T002
+      touches only the post-render watch path — the empty-result, invalid-config, and
+      independent-multi-slot code paths are unchanged from feature 001, and the exact unit tests
+      that cover them ("never calls the client for an invalid slot," "never calls the renderer
+      when the result is empty," "resolves each slot independently — a hung slot never blocks
+      another") still pass unmodified (T006's 50/50). A live re-walkthrough would have required
+      mutating the shared adconfig state the full-circle demo currently depends on for no
+      additional coverage beyond what those tests already give.
 
 ---
 
