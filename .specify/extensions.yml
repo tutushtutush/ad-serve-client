@@ -1,0 +1,21 @@
+# Spec Kit extension hooks for this project.
+#
+# before_specify runs before /speckit-specify creates the spec directory.
+# It creates (or reuses) a git branch named after the feature number, so
+# each feature gets its own branch instead of everything landing on main.
+#
+# The hook command is resolved by replacing "." with "-" and invoking it
+# as a slash command, e.g. speckit.git.branch -> /speckit-git-branch.
+# That command is implemented locally at .claude/skills/speckit-git-branch/
+# (this repo has no bundled git extension, so it's a minimal hand-rolled
+# equivalent rather than an installed package).
+
+hooks:
+  before_specify:
+    - extension: git
+      command: speckit.git.branch
+      optional: false
+      enabled: true
+      description: >
+        Create/checkout a git branch named after the feature number
+        before the spec directory is created.
