@@ -43,13 +43,19 @@ Publishers paste the loader snippet once per page, anywhere before or after thei
 <script>
   window.adServe = window.adServe || { q: [] };
 </script>
-<script async src="https://cdn.example.com/ad-serve-client.js"></script>
+<script
+  async
+  src="https://cdn.example.com/ad-serve-client.js"
+  data-api-base-url="https://ads.example.com"
+></script>
 ```
 
 - The inline snippet establishes the command queue before the async bundle has necessarily
   loaded. This feature does not yet define any queued commands beyond the implicit "scan the page
   once ready" behavior — an explicit command API is out of scope for this feature (see spec.md
   Assumptions) and may be added by a later feature without changing this contract.
+- `data-api-base-url` on the bundle's own `<script>` tag tells the SDK which ad-serve-api instance
+  to call. It is read once, synchronously, when the bundle starts executing.
 - No publisher-invoked function call is required beyond including both snippets — slot discovery
   and requesting happens automatically per FR-002.
 

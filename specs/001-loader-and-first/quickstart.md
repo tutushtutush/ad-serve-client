@@ -33,7 +33,7 @@ Create a local HTML file with the loader snippet and one slot, pointed at ad-ser
     <script>
       window.adServe = window.adServe || { q: [] };
     </script>
-    <script src="./dist/ad-serve-client.js"></script>
+    <script src="./dist/ad-serve-client.js" data-api-base-url="http://localhost:4000"></script>
   </body>
 </html>
 ```
