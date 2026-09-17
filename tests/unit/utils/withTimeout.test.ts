@@ -36,4 +36,19 @@ describe("withTimeout", () => {
     clearSpy.mockRestore();
     jest.useRealTimers();
   });
+
+  it("still clears the timeout when fn throws synchronously instead of returning a promise", async () => {
+    jest.useFakeTimers();
+    const clearSpy = jest.spyOn(global, "clearTimeout");
+
+    const fn = (): never => {
+      throw new Error("synchronous failure");
+    };
+
+    await expect(withTimeout(1000, fn)).rejects.toThrow("synchronous failure");
+    expect(clearSpy).toHaveBeenCalled();
+
+    clearSpy.mockRestore();
+    jest.useRealTimers();
+  });
 });

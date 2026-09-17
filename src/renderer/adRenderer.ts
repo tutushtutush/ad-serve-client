@@ -17,11 +17,16 @@ function buildCreativeMarkup(creative: AdCreative): string {
     ? `<img src="${escapeForMarkup(creative.backgroundImageDataUrl)}" alt="${altText}" style="display:block;width:100%;height:100%;object-fit:cover;" />`
     : "";
 
+  // The CTA is rendered as a <span> styled to look like a button, not a real
+  // <button>: nesting interactive content (a <button>) inside another
+  // interactive element (this <a>) is invalid HTML5 and leaves keyboard/
+  // screen-reader activation behavior undefined. A single <a> wrapping
+  // everything keeps one unambiguous, fully-keyboard-accessible target.
   return `<!DOCTYPE html><html><body style="margin:0;">
     <a href="${href}" target="_blank" rel="noopener noreferrer" style="display:block;height:100%;text-decoration:none;">
       ${image}
       <div>${headline}</div>
-      <button type="button">${ctaText}</button>
+      <span role="button">${ctaText}</span>
     </a>
   </body></html>`;
 }

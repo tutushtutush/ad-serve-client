@@ -5,7 +5,8 @@ import {
   type AdDecisionClientLike,
   type AdRendererLike,
 } from "../../../src/orchestrator/adOrchestrator";
-import type { AdCandidate, AdDecisionResult } from "../../../src/types";
+import type { AdDecisionResult } from "../../../src/types";
+import { makeAd } from "../fixtures/adCreative";
 
 function createSlotElement(attrs: Record<string, string>): HTMLElement {
   const el = document.createElement("div");
@@ -16,25 +17,7 @@ function createSlotElement(attrs: Record<string, string>): HTMLElement {
   return el;
 }
 
-const ad: AdCandidate = {
-  creative: {
-    backgroundImageDataUrl: null,
-    logoImageDataUrl: null,
-    logoBackgroundEnabled: false,
-    logoBackgroundColor: "",
-    headline: "Sale",
-    ctaText: "Go",
-    linkUrl: "https://example.com",
-    altText: "",
-    headlineTextColor: "",
-    headlineFontFamily: "",
-    ctaTextColor: "",
-    ctaFontFamily: "",
-    ctaBackgroundColor: "",
-  },
-  width: 300,
-  height: 250,
-};
+const ad = makeAd();
 
 describe("parseSlotConfig", () => {
   it("returns a config for a slot with required fields", () => {

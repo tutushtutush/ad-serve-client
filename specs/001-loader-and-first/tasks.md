@@ -242,6 +242,40 @@ configuration, independent of the other slot's result (quickstart.md Scenario 5)
 
 ---
 
+## Post-Implementation Code Review
+
+A code review of PR #1 (two parallel agents: correctness scan + reuse/simplification scan)
+surfaced 6 findings after all tasks above were marked complete. All 6 were fixed on this branch:
+
+- **`src/client/adDecisionClient.ts`**: `isAdCandidate` only checked that `creative` was a
+  non-null object and `width`/`height` were numbers — it never validated `AdCreative`'s string
+  fields or rejected non-positive dimensions. A malformed response (e.g. `headline: null`) could
+  pass the Client boundary as `"filled"` and crash two layers downstream in
+  `adRenderer`'s `escapeForMarkup`, only staying silent by accident of the Orchestrator's
+  catch-all rather than the documented client-side normalization. Deepened `isAdCandidate` (new
+  `isAdCreative` helper) to validate every `AdCreative` string field and require positive
+  `width`/`height`; added regression tests for both.
+- **`src/renderer/adRenderer.ts`**: the creative markup nested a `<button>` inside the wrapping
+  `<a>`, invalid HTML5 (interactive content in interactive content) with undefined keyboard/
+  screen-reader activation behavior. Replaced with a `<span role="button">` styled the same way —
+  a single unambiguous `<a>` remains the only interactive element; added a regression test.
+- **`src/utils/withTimeout.ts`**: a synchronous throw from `fn` skipped `.finally`, leaking the
+  timer. Fixed by wrapping the synchronous `fn(...)` call itself in try/catch (kept as a
+  synchronous call, not deferred via `.then`, since an earlier attempt at this fix broke the
+  existing abort-timing tests — deferring `fn` into a microtask let the timeout fire before
+  `fn`'s abort listener was attached). Added a regression test.
+- **`src/orchestrator/adOrchestrator.ts`**: `AdDecisionClientLike.requestAd` inlined a duplicate
+  of `AdDecisionRequest`'s shape instead of importing it. Now imports and reuses the type
+  directly.
+- **Tests**: the 13-field `AdCreative` literal was hand-rolled separately in three test files.
+  Extracted to `tests/unit/fixtures/adCreative.ts` (`makeAdCreative`/`makeAd`), reused by all
+  three.
+
+Re-verified after fixes: lint/typecheck/38-of-38 unit tests clean, and all 5 quickstart.md
+scenarios re-run end-to-end against a real local ad-serve-api instance with no regressions.
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

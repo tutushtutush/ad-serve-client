@@ -1,21 +1,7 @@
 import { createAdDecisionClient, type FetchLike, type FetchResponseLike } from "../../../src/client/adDecisionClient";
-import type { AdCreative } from "../../../src/types";
+import { makeAdCreative } from "../fixtures/adCreative";
 
-const creative: AdCreative = {
-  backgroundImageDataUrl: null,
-  logoImageDataUrl: null,
-  logoBackgroundEnabled: false,
-  logoBackgroundColor: "",
-  headline: "Summer Sale",
-  ctaText: "Shop Now",
-  linkUrl: "https://example.com/sale",
-  altText: "Summer Sale banner",
-  headlineTextColor: "",
-  headlineFontFamily: "",
-  ctaTextColor: "",
-  ctaFontFamily: "",
-  ctaBackgroundColor: "",
-};
+const creative = makeAdCreative();
 
 function jsonResponse(ok: boolean, body: unknown): FetchResponseLike {
   return { ok, json: async () => body };
@@ -120,6 +106,28 @@ describe("createAdDecisionClient", () => {
 
   it("returns empty when the response body doesn't match the expected shape", async () => {
     const fetchImpl: FetchLike = jest.fn(async () => jsonResponse(true, { unexpected: true }));
+    const client = createAdDecisionClient(fetchImpl, baseUrl);
+
+    const result = await client.requestAd({ platformId: "plat-1", adTypeId: "banner" });
+
+    expect(result).toEqual({ status: "empty" });
+  });
+
+  it("returns empty when the creative has a non-string field", async () => {
+    const fetchImpl: FetchLike = jest.fn(async () =>
+      jsonResponse(true, { ad: { creative: { ...creative, headline: null }, width: 300, height: 250 } }),
+    );
+    const client = createAdDecisionClient(fetchImpl, baseUrl);
+
+    const result = await client.requestAd({ platformId: "plat-1", adTypeId: "banner" });
+
+    expect(result).toEqual({ status: "empty" });
+  });
+
+  it("returns empty when width or height is zero or negative", async () => {
+    const fetchImpl: FetchLike = jest.fn(async () =>
+      jsonResponse(true, { ad: { creative, width: -1, height: 250 } }),
+    );
     const client = createAdDecisionClient(fetchImpl, baseUrl);
 
     const result = await client.requestAd({ platformId: "plat-1", adTypeId: "banner" });

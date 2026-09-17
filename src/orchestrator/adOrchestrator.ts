@@ -1,12 +1,7 @@
-import type { AdCandidate, AdDecisionResult, AdSlotConfig } from "../types";
+import type { AdCandidate, AdDecisionRequest, AdDecisionResult, AdSlotConfig } from "../types";
 
 export interface AdDecisionClientLike {
-  requestAd(request: {
-    platformId: string;
-    adTypeId: string;
-    country?: string;
-    deviceType?: string;
-  }): Promise<AdDecisionResult>;
+  requestAd(request: AdDecisionRequest): Promise<AdDecisionResult>;
 }
 
 export interface AdRendererLike {

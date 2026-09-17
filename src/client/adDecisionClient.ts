@@ -24,16 +24,50 @@ function buildQueryString(request: AdDecisionRequest): string {
   return params.toString();
 }
 
+const CREATIVE_STRING_FIELDS = [
+  "headline",
+  "ctaText",
+  "linkUrl",
+  "altText",
+  "headlineTextColor",
+  "headlineFontFamily",
+  "ctaTextColor",
+  "ctaFontFamily",
+  "ctaBackgroundColor",
+  "logoBackgroundColor",
+] as const;
+
+function isAdCreative(value: unknown): value is AdCandidate["creative"] {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const creative = value as Record<string, unknown>;
+  if (typeof creative.logoBackgroundEnabled !== "boolean") {
+    return false;
+  }
+  if (
+    creative.backgroundImageDataUrl !== null &&
+    typeof creative.backgroundImageDataUrl !== "string"
+  ) {
+    return false;
+  }
+  if (creative.logoImageDataUrl !== null && typeof creative.logoImageDataUrl !== "string") {
+    return false;
+  }
+  return CREATIVE_STRING_FIELDS.every((field) => typeof creative[field] === "string");
+}
+
 function isAdCandidate(value: unknown): value is AdCandidate {
   if (typeof value !== "object" || value === null) {
     return false;
   }
   const candidate = value as Record<string, unknown>;
   return (
-    typeof candidate.creative === "object" &&
-    candidate.creative !== null &&
+    isAdCreative(candidate.creative) &&
     typeof candidate.width === "number" &&
-    typeof candidate.height === "number"
+    candidate.width > 0 &&
+    typeof candidate.height === "number" &&
+    candidate.height > 0
   );
 }
 

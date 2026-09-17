@@ -1,28 +1,5 @@
 import { createAdRenderer } from "../../../src/renderer/adRenderer";
-import type { AdCandidate } from "../../../src/types";
-
-function makeAd(overrides: Partial<AdCandidate["creative"]> = {}): AdCandidate {
-  return {
-    creative: {
-      backgroundImageDataUrl: null,
-      logoImageDataUrl: null,
-      logoBackgroundEnabled: false,
-      logoBackgroundColor: "",
-      headline: "Summer Sale",
-      ctaText: "Shop Now",
-      linkUrl: "https://example.com/sale",
-      altText: "Summer Sale banner",
-      headlineTextColor: "",
-      headlineFontFamily: "",
-      ctaTextColor: "",
-      ctaFontFamily: "",
-      ctaBackgroundColor: "",
-      ...overrides,
-    },
-    width: 300,
-    height: 250,
-  };
-}
+import { makeAd } from "../fixtures/adCreative";
 
 describe("createAdRenderer", () => {
   it("appends an iframe with a narrow sandbox and no scripting privileges", () => {
@@ -65,6 +42,18 @@ describe("createAdRenderer", () => {
     expect(markup).not.toContain("<script>alert");
     expect(markup).toContain("&lt;script&gt;");
     expect(markup).toContain("A &amp; B");
+  });
+
+  it("never nests a <button> inside the <a> (invalid HTML5)", () => {
+    document.body.innerHTML = "";
+    const slot = document.createElement("div");
+    document.body.append(slot);
+
+    createAdRenderer(document).renderAd(slot, makeAd());
+
+    const markup = slot.querySelector("iframe")?.getAttribute("srcdoc") ?? "";
+    expect(markup).not.toContain("<button");
+    expect(markup).toContain('role="button"');
   });
 
   it("falls back to a safe href when linkUrl isn't http(s)", () => {
