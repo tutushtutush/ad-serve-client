@@ -1,6 +1,15 @@
 import { escapeForMarkup } from "../utils/escapeForMarkup";
 import type { AdCandidate, AdCreative } from "../types";
 
+// creative's fields are opaque and optional (types.ts) — ad-serve-api only
+// includes whatever a campaign actually set, not every field backfilled
+// with a default. Coerce anything non-string (including undefined/null) to
+// "" before escaping, so a sparse or unexpectedly-shaped creative degrades
+// to blank text/a safe fallback instead of crashing.
+function asSafeString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
 // Only allow http(s) links — the creative's linkUrl is external, untrusted
 // data, and rendering it as an href must never permit a javascript: (or
 // other) scheme escape.
@@ -9,12 +18,13 @@ function toSafeHref(url: string): string {
 }
 
 function buildCreativeMarkup(creative: AdCreative): string {
-  const headline = escapeForMarkup(creative.headline);
-  const ctaText = escapeForMarkup(creative.ctaText);
-  const altText = escapeForMarkup(creative.altText);
-  const href = escapeForMarkup(toSafeHref(creative.linkUrl));
-  const image = creative.backgroundImageDataUrl
-    ? `<img src="${escapeForMarkup(creative.backgroundImageDataUrl)}" alt="${altText}" style="display:block;width:100%;height:100%;object-fit:cover;" />`
+  const headline = escapeForMarkup(asSafeString(creative.headline));
+  const ctaText = escapeForMarkup(asSafeString(creative.ctaText));
+  const altText = escapeForMarkup(asSafeString(creative.altText));
+  const href = escapeForMarkup(toSafeHref(asSafeString(creative.linkUrl)));
+  const backgroundImageDataUrl = asSafeString(creative.backgroundImageDataUrl);
+  const image = backgroundImageDataUrl
+    ? `<img src="${escapeForMarkup(backgroundImageDataUrl)}" alt="${altText}" style="display:block;width:100%;height:100%;object-fit:cover;" />`
     : "";
 
   // The CTA is rendered as a <span> styled to look like a button, not a real

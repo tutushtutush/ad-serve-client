@@ -113,7 +113,21 @@ describe("createAdDecisionClient", () => {
     expect(result).toEqual({ status: "empty" });
   });
 
-  it("returns empty when the creative has a non-string field", async () => {
+  it("accepts a creative with only some fields set — ad-serve-api only includes fields a campaign actually set", async () => {
+    // Real ad-serve-api responses omit unset fields entirely rather than
+    // backfilling every AdCreative field with a default (see types.ts).
+    const sparseCreative = { headline: "Sale", ctaText: "Go", linkUrl: "https://example.com", altText: "" };
+    const fetchImpl: FetchLike = jest.fn(async () =>
+      jsonResponse(true, { ad: { creative: sparseCreative, width: 300, height: 250 } }),
+    );
+    const client = createAdDecisionClient(fetchImpl, baseUrl);
+
+    const result = await client.requestAd({ platformId: "plat-1", adTypeId: "banner" });
+
+    expect(result).toEqual({ status: "filled", ad: { creative: sparseCreative, width: 300, height: 250 } });
+  });
+
+  it("accepts a creative with an unexpectedly-typed field — per-field safety is the Renderer's job, not the Client's", async () => {
     const fetchImpl: FetchLike = jest.fn(async () =>
       jsonResponse(true, { ad: { creative: { ...creative, headline: null }, width: 300, height: 250 } }),
     );
@@ -121,7 +135,7 @@ describe("createAdDecisionClient", () => {
 
     const result = await client.requestAd({ platformId: "plat-1", adTypeId: "banner" });
 
-    expect(result).toEqual({ status: "empty" });
+    expect(result.status).toBe("filled");
   });
 
   it("returns empty when width or height is zero or negative", async () => {
