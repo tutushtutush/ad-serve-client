@@ -37,3 +37,9 @@
   Cases/Assumptions gloss explaining the general pattern in plain terms —
   the User Scenarios, Requirements, and Success Criteria sections themselves
   describe the behavior without naming a specific framework or mechanism.
+- **Re-validated after amendment** (real-world verification against
+  eventpulse surfaced that post-display removal is the dominant case, not
+  the out-of-scope edge case originally assumed — see spec.md's Assumptions
+  and FR-009/FR-010). All items still pass: the new acceptance scenario,
+  edge cases, and requirements remain implementation-detail-free and
+  testable without naming a specific framework or mechanism.

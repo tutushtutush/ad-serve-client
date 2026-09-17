@@ -34,6 +34,11 @@ matching ad available, and confirming the ad still appears in the slot.
 2. **Given** the same situation, **When** the ad is displayed, **Then** it appears in the section
    of the page currently shown to the visitor, not in a piece of the page that is no longer
    present.
+3. **Given** the ad decision arrives quickly enough that the ad is displayed *before* the page's
+   framework finishes redrawing that section, **When** the framework's own redraw then removes
+   the just-displayed ad as a side effect of settling that section, **Then** the ad is displayed
+   again in whichever element currently represents the slot, so the visitor still ends up seeing
+   it.
 
 ---
 
@@ -89,8 +94,13 @@ appears once it is ready.
   and targeting) and both are replaced around the same time? Each slot's ad result MUST still end
   up in the correct one of the two current elements — never displayed in the other slot's element
   instead.
-- What happens when a slot's element is replaced after its ad has already been successfully
-  displayed? Out of scope for this feature — see Assumptions.
+- What happens when a slot's already-displayed ad is removed by the page's own redraw activity
+  shortly after being displayed? It MUST be displayed again, per User Story 1's third acceptance
+  scenario — this is no longer out of scope (see Assumptions).
+- What happens when a slot's already-displayed ad keeps being removed, over and over, well beyond
+  what a one-time page redraw would ever cause? The system MUST eventually stop trying again
+  (FR-010) rather than retry forever — see Assumptions for why a retry limit, not a time limit, is
+  the right bound here.
 - What happens when a slot's element is removed and never replaced, but only after a long delay
   (not immediately)? It MUST still resolve to empty with no error, the same as an immediate
   removal — timing of the removal does not change the outcome.
@@ -117,15 +127,24 @@ appears once it is ready.
 - **FR-007**: The system MUST correctly distinguish between two different slots that happen to
   share identical placement/targeting configuration — a replacement for one such slot MUST NOT be
   mistaken for a replacement of the other.
-- **FR-008**: Once a slot's outcome is determined (an ad was displayed, or it resolved to empty),
-  the system MUST stop tracking that slot for further page changes — it does not keep watching a
-  resolved slot indefinitely.
+- **FR-008**: Once a slot's outcome is finally determined (its displayed ad has survived the
+  page's own redraw activity per FR-009/FR-010, or it resolved to empty), the system MUST stop
+  tracking that slot for further page changes — it does not keep watching a finished slot
+  indefinitely.
+- **FR-009**: If a slot's already-displayed ad is removed shortly after being displayed — as a
+  side effect of the page's own framework redrawing that section, not a genuine, lasting removal
+  of the slot — the system MUST display the ad again in whichever element currently represents
+  that slot.
+- **FR-010**: The system MUST NOT attempt to redisplay a slot's ad an unlimited number of times —
+  after a bounded number of attempts, the system MUST stop and leave the slot in whatever state it
+  last reached, rather than retry indefinitely.
 
 ### Key Entities
 
-- **Tracked Slot**: The ongoing record of one ad slot's in-progress request, kept independent of
-  which specific page element currently represents it, so a resolved ad result can be reconnected
-  to whatever element currently exists for that slot once the request completes.
+- **Tracked Slot**: The ongoing record of one ad slot, kept independent of which specific page
+  element currently represents it, so a resolved ad result can be reconnected to whatever element
+  currently exists for that slot — both when the ad decision first arrives (FR-003) and, if
+  needed, again afterward if the displayed ad is removed by the page's own activity (FR-009).
 
 ## Success Criteria *(mandatory)*
 
@@ -134,7 +153,8 @@ appears once it is ready.
 - **SC-001**: On a page built with a framework that redraws its own content shortly after load, a
   visitor sees a correctly configured slot's ad appear just as reliably as on a page that does not
   redraw itself — 100% of such cases display the ad when one is available, compared to the ad
-  never appearing before this feature.
+  never appearing before this feature. This holds regardless of which happens first, the page's
+  redraw or the ad becoming ready.
 - **SC-002**: A slot that is genuinely and permanently removed from the page never displays an ad
   and never produces an error, in 100% of observed cases — unchanged from existing behavior.
 - **SC-003**: No slot ever displays more than one ad, regardless of how many times its page element
@@ -144,14 +164,31 @@ appears once it is ready.
 
 ## Assumptions
 
-- This feature covers a slot's element being replaced only before that slot's ad result has been
-  displayed. A slot's element being removed or replaced *after* an ad has already been
-  successfully displayed in it is a separate concern and is out of scope here.
+- **Amended** (originally this feature covered only replacement *before* an ad displayed,
+  treating post-display removal as separate/out of scope — see Functional Requirements' FR-009/
+  FR-010 for the amendment and User Story 1's third acceptance scenario). Real-world verification
+  against an actual React/Next.js page (eventpulse) showed the *reverse* timing case is not a rare
+  edge case but the dominant one against a fast ad-decision backend: the ad can be displayed
+  *before* the page's own framework finishes reconciling that section, and the framework's own
+  mismatch-recovery behavior then removes it as a side effect of settling. Since shipping this
+  feature without covering that case would not actually achieve its own stated purpose (a slot's
+  ad reliably appearing despite the host page's own rendering activity, User Story 1), both
+  directions of the same underlying race are now in scope: replacement before display (original
+  scope) and removal shortly after display (this amendment).
+- The redisplay bound (FR-010) is a limited number of attempts, not a time limit. A framework's
+  own initial-hydration redraw is a one-time, bounded event per page load, not an ongoing process
+  — a small, fixed number of redisplay attempts comfortably covers it without needing to guess a
+  duration that would vary by page complexity and device performance. An indefinitely-growing
+  attempt count would instead suggest something other than one-time hydration is repeatedly
+  removing the ad, at which point continuing to retry stops being useful.
 - "A framework that redraws its own content shortly after load" refers to ordinary client-side
-  rendering behavior (such as a UI framework attaching interactivity to already-visible content),
-  not to a publisher deliberately and repeatedly rebuilding their entire page on a timer or in
-  response to unrelated user actions — sustained, ongoing page rebuilding well after load is not
-  a scenario this feature is scoped to handle.
-- This feature changes only how ad-serve-client discovers and tracks slots internally; it does not
-  change the ad-decision request/response behavior, the rendering behavior, or the fail-silent
-  guarantees established by the foundational request/render flow feature.
+  rendering behavior (such as a UI framework attaching interactivity to already-visible content,
+  or reconciling content it rendered against what was already server-rendered), not to a publisher
+  deliberately and repeatedly rebuilding their entire page on a timer or in response to unrelated
+  user actions — sustained, ongoing page rebuilding well after load is not a scenario this feature
+  is scoped to handle, and is exactly the case the redisplay bound above is meant to stop reacting
+  to.
+- This feature changes only how ad-serve-client discovers, tracks, and (when needed) redisplays
+  ads for slots internally; it does not change the ad-decision request/response behavior, the
+  actual rendering mechanism, or the fail-silent guarantees established by the foundational
+  request/render flow feature.
