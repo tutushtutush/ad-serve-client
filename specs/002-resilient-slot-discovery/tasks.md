@@ -240,3 +240,38 @@ final container.
 This feature is essentially two changes (T001, T002) verified from several angles (T003–T005,
 T008) — there is no meaningful incremental split beyond that; all three user stories become true
 once Phase 1 lands.
+
+## Post-Implementation Code Review
+
+A code review of this branch (correctness scan + reuse/cleanup scan) surfaced 4 findings after
+all tasks above were marked complete. 3 were fixed; 1 was deliberately deferred:
+
+- **`src/orchestrator/adOrchestrator.ts`** (correctness, most severe): the redisplay path gave up
+  permanently — marking the slot `resolved` — the instant a single mutation batch found no
+  current element at the slot's group position, even with `redisplaysRemaining` budget unused. A
+  framework that removes and reinserts a slot across two separate mutation batches (rather than
+  one coalesced swap) would hit this and silently lose the ad forever, reintroducing the exact
+  failure this feature exists to fix. Fixed: an empty batch now consumes `quietBatchesRemaining`
+  (the same counter used for settling) instead of resolving immediately, giving later batches a
+  real chance to bring the replacement. Added a regression test simulating removal and
+  reinsertion in separate batches.
+- **`src/renderer/adRenderer.ts`**: the image-inclusion check truthy-tested the raw
+  `creative.backgroundImageDataUrl` but rendered it through `asSafeString` (which coerces any
+  non-string to `""`), so a truthy non-string value produced a broken `<img src="">` instead of
+  omitting the image. Fixed by computing the safe string once and truthy-checking *that*. Added a
+  regression test.
+- **`src/orchestrator/adOrchestrator.ts`**: `mapSlotsByGroupPosition` duplicated the group-
+  key/position counting logic `run()` also implemented inline — a real risk that a future
+  grouping change would only be made in one place, silently misassigning ads between same-
+  configuration slots (the exact class of bug FR-007 guards against). Extracted a single shared
+  `groupDiscoveredSlots` used by both.
+- **Deferred**: every mutation batch re-scans the whole document via `querySelectorAll`, even for
+  mutations unrelated to any tracked slot. Real, but already bounded by the existing
+  quiet-batch/redisplay counters (not an unbounded cost) — filtering mutation records to only
+  relevant ones would add real complexity for a cost that's already capped by design. Left as-is;
+  worth revisiting only if a real page's mutation volume during the watch window turns out to
+  matter in practice.
+
+Re-verified after fixes: lint/typecheck/52-of-52 unit tests clean, all 5 standalone quickstart
+scenarios and 5 fresh reloads of the real eventpulse environment (dev mode) still pass with no
+regressions.

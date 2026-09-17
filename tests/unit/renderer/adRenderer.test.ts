@@ -93,4 +93,20 @@ describe("createAdRenderer", () => {
 
     expect(() => createAdRenderer(document).renderAd(slot, malformedAd)).not.toThrow();
   });
+
+  it("omits the image entirely when backgroundImageDataUrl is a truthy non-string, instead of rendering a broken empty src", () => {
+    document.body.innerHTML = "";
+    const slot = document.createElement("div");
+    document.body.append(slot);
+
+    // A truthy but non-string value (e.g. a malformed upstream response) —
+    // must not produce <img src="">, which the browser treats as a broken
+    // image / unexpected request.
+    const malformedAd = makeAd({ backgroundImageDataUrl: 42 as unknown as string });
+
+    createAdRenderer(document).renderAd(slot, malformedAd);
+
+    const markup = slot.querySelector("iframe")?.getAttribute("srcdoc") ?? "";
+    expect(markup).not.toContain("<img");
+  });
 });

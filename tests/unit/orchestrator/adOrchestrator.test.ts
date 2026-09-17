@@ -457,4 +457,36 @@ describe("createAdOrchestrator.run", () => {
 
     expect(renderer.renderAd).toHaveBeenCalledTimes(1);
   });
+
+  it("still redisplays when the replacement arrives in a later mutation batch, not the same one as the removal", async () => {
+    const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    document.body.innerHTML = "";
+    document.body.append(el);
+
+    const client: AdDecisionClientLike = {
+      requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
+    };
+    const renderer: AdRendererLike = { renderAd: jest.fn() };
+    const orchestrator = createAdOrchestrator({ client, renderer });
+
+    orchestrator.run(document);
+    await flushMicrotasks(); // initial render
+    expect(renderer.renderAd).toHaveBeenCalledTimes(1);
+
+    // Removal with no replacement in this batch — a framework may remove
+    // and reinsert across separate ticks rather than one coalesced swap.
+    el.remove();
+    await flushMicrotasks();
+    expect(renderer.renderAd).toHaveBeenCalledTimes(1); // no redisplay yet, but not given up either
+
+    // The replacement arrives in a distinctly later batch.
+    const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    document.body.append(replacement);
+    await flushMicrotasks();
+
+    expect(client.requestAd).toHaveBeenCalledTimes(1); // still no second request
+    expect(renderer.renderAd).toHaveBeenCalledTimes(2);
+    const [renderedElement] = (renderer.renderAd as jest.Mock).mock.calls[1];
+    expect(renderedElement).toBe(replacement);
+  });
 });

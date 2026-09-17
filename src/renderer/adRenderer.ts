@@ -22,8 +22,9 @@ function buildCreativeMarkup(creative: AdCreative): string {
   const ctaText = escapeForMarkup(asSafeString(creative.ctaText));
   const altText = escapeForMarkup(asSafeString(creative.altText));
   const href = escapeForMarkup(toSafeHref(asSafeString(creative.linkUrl)));
-  const image = creative.backgroundImageDataUrl
-    ? `<img src="${escapeForMarkup(asSafeString(creative.backgroundImageDataUrl))}" alt="${altText}" style="display:block;width:100%;height:100%;object-fit:cover;" />`
+  const backgroundImageDataUrl = asSafeString(creative.backgroundImageDataUrl);
+  const image = backgroundImageDataUrl
+    ? `<img src="${escapeForMarkup(backgroundImageDataUrl)}" alt="${altText}" style="display:block;width:100%;height:100%;object-fit:cover;" />`
     : "";
 
   // The CTA is rendered as a <span> styled to look like a button, not a real
