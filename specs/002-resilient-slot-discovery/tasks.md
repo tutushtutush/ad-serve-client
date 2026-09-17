@@ -32,7 +32,7 @@ existing test file.
 
 ## Phase 1: Foundational (Core Implementation)
 
-**Purpose**: The one change every user story depends on — there is no separate per-story
+**Purpose**: The two changes every user story depends on — there is no separate per-story
 implementation, matching this feature's single-module scope (plan.md's Project Structure).
 
 - [X] T001 Rewrite discovery/tracking in `src/orchestrator/adOrchestrator.ts`: introduce a
@@ -52,20 +52,44 @@ implementation, matching this feature's single-module scope (plan.md's Project S
 
       Unit tests in `tests/unit/orchestrator/adOrchestrator.test.ts`, extending the existing
       suite (feature 001's cases — valid/invalid slot, empty result, independent multi-slot — must
-      still pass unmodified):
-      - a slot's element is replaced once before the ad result resolves → the ad renders into the
-        *new* element, not the original (US1).
-      - a slot's element is replaced twice before the ad result resolves → exactly one ad is
-        rendered, into the final element (US3, FR-005).
-      - a slot's element is removed with no replacement before the ad result resolves → resolves
-        empty, no render, nothing thrown (US2, FR-004).
-      - two slots share identical configuration and only one's element is replaced → each
-        resolves into its own correct current element, never crossed (FR-007).
-      - a Tracked Slot that has already resolved is unaffected by a later, unrelated mutation
+      still pass unmodified): element replaced once/twice before resolution, element removed with
+      no replacement, duplicate-config disambiguation, resolved slot ignores later mutations, a
+      thrown error inside mutation-handling is caught and recovers.
+      **Amended during T002's real-environment verification**: also fixed an unrelated bug —
+      `isAdCandidate` (feature 001's PR #1 code-review fix) required every `AdCreative` field
+      present, but ad-serve-api's real responses only include fields a campaign actually set.
+      Made `AdCreative`'s fields optional (types.ts), simplified the Client's validation to match
+      the genuinely-opaque contract, and moved per-field safety into the Renderer (`asSafeString`)
+      where the actual crash risk lives. See f79d0c6.
+
+- [X] T002 Extend `src/orchestrator/adOrchestrator.ts` for bounded post-render redisplay
+      (spec.md amendment, FR-009/FR-010/data-model.md): a Tracked Slot gains `ad` (the already-
+      fetched `AdCandidate`, remembered for reuse), `renderedElement` (the specific element last
+      rendered into), `redisplaysRemaining` (starts at 2), and `quietBatchesRemaining` (starts at
+      3, reset on each (re)display). After a successful render, the slot is *not* marked
+      `resolved` — the `MutationObserver` callback now also checks, for every rendered-but-not-
+      yet-settled slot, whether `renderedElement` is still connected: if yes, decrement
+      `quietBatchesRemaining` (settle and mark `resolved` at 0); if no, look up a current element
+      for the slot and, if `redisplaysRemaining > 0`, call `renderer.renderAd` again with the
+      *same* remembered `ad` (never a second `client.requestAd` call — research.md), decrement
+      `redisplaysRemaining`, reset `quietBatchesRemaining` to 3, and update `renderedElement`;
+      otherwise (no current element, or attempts exhausted) mark `resolved` (empty — FR-010's
+      "leave it in whatever state it last reached"). The mutation-callback try/catch from T001
+      covers this new logic too — no separate wrapping needed.
+
+      Unit tests added to `tests/unit/orchestrator/adOrchestrator.test.ts`:
+      - the rendered element is removed and replaced once → the same ad is redisplayed into the
+        new element, with no second `client.requestAd` call (US1 scenario 3, FR-009).
+      - the rendered element is removed and replaced up to the redisplay bound, then removed one
+        more time with no replacement → the slot ends up empty, no error, no further attempts
+        (FR-010).
+      - the rendered element is removed and replaced repeatedly, beyond the redisplay bound →
+        redisplay stops after the bounded number of attempts even though replacements keep
+        happening (FR-010's "never retry indefinitely").
+      - the rendered element stays connected for `quietBatchesRemaining` consecutive mutation
+        batches → the slot settles (`resolved`) and a further, later mutation has no effect
         (FR-008).
-      - a thrown error inside the mutation-handling logic (simulated) is caught and does not
-        propagate, and a subsequent mutation is still processed normally (Constitution Principle
-        V).
+      Depends on T001.
 
 **Checkpoint**: Foundation ready — every user story below is already functionally complete once
 this lands; the phases below verify it against real and standalone pages rather than adding more
@@ -76,42 +100,21 @@ code.
 ## Phase 2: User Story 1 - An ad still appears on a page that redraws itself after load (Priority: P1) 🎯 MVP
 
 **Goal**: The exact real-world bug this feature exists to fix — confirmed against the actual
-environment that surfaced it, not just a synthetic test.
+environment that surfaced it, not just a synthetic test. Covers both timing directions of the
+same underlying race (spec.md amendment).
 
-**Independent Test**: quickstart.md Scenario 1 — reload eventpulse's real homepage (React
-hydration replaces the ad slot's container ~50ms after load) and confirm the seeded ad now
-appears, where it previously silently failed to.
+**Independent Test**: quickstart.md Scenario 1 — reload eventpulse's real homepage repeatedly and
+confirm the seeded ad appears and *stays* displayed, with no hydration-mismatch warning in the
+console.
 
-- [ ] T002 [US1] Run quickstart.md Scenario 1 against the real eventpulse full-circle environment:
+- [ ] T003 [US1] Run quickstart.md Scenario 1 against the real eventpulse full-circle environment:
       rebuild this repo, recopy `dist/ad-serve-client.js` into eventpulse's `public/`, reload the
-      homepage with eventpulse + eventpulse-api + ad-serve-api all running. Confirm the ad appears
-      inside the *current* slot element (inspect that it's connected, not a leftover detached
-      node). Depends on T001.
-      **Blocked, then partially resolved — two distinct findings surfaced by this task:**
-      1. **Unrelated bug, fixed**: T001's build never actually got far enough to test the new
-         tracking logic — `isAdCandidate` (from feature 001's PR #1 code-review fix) requires
-         every `AdCreative` field to be present, but ad-serve-api's real response only includes
-         fields a campaign actually set (`headline`/`ctaText`/`linkUrl`/`altText` — 4 of 13),
-         omitting the rest entirely rather than backfilling defaults. This silently rejected a
-         perfectly valid ad as malformed. Fixed by making `AdCreative`'s fields optional
-         (types.ts) and moving per-field safety from the Client's validation (now just checks
-         `creative` is a plausible object, matching the "genuinely opaque" contract) to the
-         Renderer, which now coerces each field it actually uses to a safe string before escaping
-         (`asSafeString`), fixing the *original* PR #1 crash risk at the point it actually
-         matters rather than over-fitting the Client to an assumed-complete shape.
-      2. **New, deeper finding — not yet resolved, see conversation**: with (1) fixed, the ad
-         *does* render into the original slot element (confirmed via React's own hydration-
-         mismatch console error, which names our injected `<iframe>` as the extraneous node) —
-         but React then discards/regenerates that subtree to resolve the mismatch, *removing* the
-         ad immediately after. This is the *inverse* timing case from the one this feature
-         targets: our render happens fast enough (sub-ms local ad-serve-api) to *beat* hydration,
-         and hydration's own mismatch-recovery is what removes it afterward — not a replacement
-         *before* render, which is what T001 fixes. spec.md's Assumptions explicitly scope
-         "removed/replaced after an ad already rendered" as a separate, out-of-scope concern; this
-         is that exact case, now shown to be the actual dominant failure mode against a fast
-         backend, not an edge case. Paused here pending a decision on how to proceed.
+      homepage several times with eventpulse + eventpulse-api + ad-serve-api all running. Confirm
+      the ad appears inside the *current* slot element and stays there (no flicker/disappearance),
+      and confirm no hydration-mismatch console warning mentions the ad slot. Depends on T002.
 
-**Checkpoint**: User Story 1 partially verified — see the unresolved finding above.
+**Checkpoint**: User Story 1 verified against the real bug report, including the deeper finding
+T002 addresses.
 
 ---
 
@@ -123,7 +126,7 @@ replacing it, still degrades to empty exactly as before this feature.
 **Independent Test**: quickstart.md Scenario 2 — a standalone test page removes a slot's element
 shortly after load with no replacement; confirm no ad ever appears and nothing errors.
 
-- [ ] T003 [US2] Run quickstart.md Scenario 2 against the built bundle: confirm no ad appears, no
+- [ ] T004 [US2] Run quickstart.md Scenario 2 against the built bundle: confirm no ad appears, no
       console error occurs, and the rest of the page functions normally. Depends on T001.
 
 **Checkpoint**: User Stories 1 and 2 both verified.
@@ -132,15 +135,15 @@ shortly after load with no replacement; confirm no ad ever appears and nothing e
 
 ## Phase 4: User Story 3 - A slot never shows more than one ad (Priority: P3)
 
-**Goal**: The fix holds under repetition — a slot's element replaced more than once before
-resolution still ends up with exactly one ad, never zero (when one was available) and never more
-than one.
+**Goal**: The fix holds under repetition — a slot's element replaced more than once before *or
+after* resolution still ends up with exactly one ad displayed at a time, never zero (when one was
+available) and never more than one simultaneously.
 
 **Independent Test**: quickstart.md Scenario 3 — a standalone test page replaces a slot's element
 twice in quick succession before the ad result is ready; confirm exactly one ad appears, in the
 final container.
 
-- [ ] T004 [US3] Run quickstart.md Scenario 3 against the built bundle: confirm exactly one
+- [ ] T005 [US3] Run quickstart.md Scenario 3 against the built bundle: confirm exactly one
       `<iframe>` ad appears, inside the final (third) container, with no duplicate ads and nothing
       rendered into an earlier, detached container. Depends on T001.
 
@@ -150,13 +153,15 @@ final container.
 
 ## Phase 5: Polish & Cross-Cutting Concerns
 
-- [ ] T005 [P] Run `npm run lint`, `npm run typecheck`, and `npm test` clean across the whole
+- [ ] T006 [P] Run `npm run lint`, `npm run typecheck`, and `npm test` clean across the whole
       feature (confirming zero regression to feature 001's existing behavior). Confirm
       `npm run build` still compiles `dist/ad-serve-client.js`.
-- [ ] T006 [P] Run quickstart.md Scenario 4 (FR-007 — two identically-configured slots, only one
+- [ ] T007 [P] Run quickstart.md Scenario 4 (FR-007 — two identically-configured slots, only one
       replaced) against the built bundle: confirm each slot's ad ends up in its own correct
       current element, never crossed.
-- [ ] T007 [P] Re-run feature 001's quickstart.md Scenarios 2, 3, and 5 (no ad available, invalid
+- [ ] T008 [P] Run quickstart.md Scenarios 5 and 6 (FR-009/FR-010 — redisplay after post-render
+      removal, and the bounded-attempts cutoff) against the built bundle.
+- [ ] T009 [P] Re-run feature 001's quickstart.md Scenarios 2, 3, and 5 (no ad available, invalid
       slot configuration, independent multi-slot resolution) against the built bundle to confirm
       this feature introduces no regression to behavior those scenarios already cover.
 
@@ -166,16 +171,18 @@ final container.
 
 ### Phase Dependencies
 
-- **Foundational (Phase 1)**: No dependencies — BLOCKS every user story.
-- **User Story 1 (Phase 2)**, **User Story 2 (Phase 3)**, **User Story 3 (Phase 4)**: Each depends
-  on Foundational only; independent of each other (different verification scenarios, no shared
-  state), can run in parallel.
+- **Foundational (Phase 1)**: T002 depends on T001 — BLOCKS every user story.
+- **User Story 1 (Phase 2)**: Depends on T002 (needs the redisplay fix, not just T001, to fully
+  pass — see T003's amendment history above).
+- **User Story 2 (Phase 3)**, **User Story 3 (Phase 4)**: Each depends on T001 only; independent
+  of each other and of Phase 2.
 - **Polish (Phase 5)**: Depends on all three user stories.
 
 ### Parallel Opportunities
 
-- T002, T003, T004 (the three user-story verifications) can run in parallel once T001 is done.
-- T005, T006, T007 (Polish) in parallel.
+- T004, T005 can run in parallel with each other and with T003 once their respective
+  dependencies (T001 for T004/T005, T002 for T003) are done.
+- T006, T007, T008, T009 (Polish) in parallel.
 
 ---
 
@@ -183,14 +190,14 @@ final container.
 
 ### MVP First
 
-1. Phase 1 (Foundational) → Phase 2 (User Story 1).
-2. **STOP and VALIDATE**: run quickstart.md Scenario 1 against the real eventpulse environment —
-   this is the exact bug report closing.
+1. Phase 1 (Foundational, T001 → T002) → Phase 2 (User Story 1).
+2. **STOP and VALIDATE**: run quickstart.md Scenario 1 against the real eventpulse environment,
+   reloading several times — this is the exact bug report closing, for both timing directions.
 3. Phases 3–4 confirm the fix is correct under the edge cases (permanent removal, repeated
    replacement) that make it safe to ship, not just correct for the one observed case.
 
 ### Incremental Delivery
 
-This feature is essentially one change (T001) verified from three angles (T002–T004) — there is
-no meaningful incremental split beyond that; all three user stories become true the moment
-Phase 1 lands.
+This feature is essentially two changes (T001, T002) verified from several angles (T003–T005,
+T008) — there is no meaningful incremental split beyond that; all three user stories become true
+once Phase 1 lands.
