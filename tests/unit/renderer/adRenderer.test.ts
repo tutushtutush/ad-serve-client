@@ -166,6 +166,20 @@ describe("createAdRenderer", () => {
       // min(300, 150) / 3 = 50
       expect(markup).toContain('width="50"');
     });
+
+    it("falls back to the placeholder when hasBackgroundImage/backgroundImageDataUrl are wrong-typed (FR-010)", () => {
+      const ad = {
+        creative: {},
+        width: 300,
+        height: 250,
+        resolvedRender: { hasBackgroundImage: "yes", backgroundImageDataUrl: {} },
+      } as unknown as AdCandidate;
+
+      const markup = renderAndGetSrcdoc(ad);
+
+      expect(markup).toContain("<svg");
+      expect(markup).not.toContain("<img");
+    });
   });
 
   describe("clickability (US5, FR-008)", () => {
@@ -183,7 +197,7 @@ describe("createAdRenderer", () => {
       );
 
       expect(markup).not.toContain("<a ");
-      expect(markup).toContain('role="img"');
+      expect(markup).toContain('role="group"');
     });
 
     it("does not become clickable when isLinked is true but linkUrl is an unsafe scheme", () => {
@@ -193,6 +207,21 @@ describe("createAdRenderer", () => {
 
       expect(markup).not.toContain("<a ");
       expect(markup).not.toContain("javascript:alert");
+    });
+
+    it("does not hide the headline/CTA text from the accessibility tree on a non-interactive wrapper (code review fix)", () => {
+      // role="img" on a wrapper that still contains real text descendants
+      // flattens them out of the accessibility tree, as if the whole thing
+      // were one opaque image — role="group" keeps the headline/CTA spans'
+      // own text exposed to assistive tech.
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({ isLinked: false, headlineText: "Summer Sale", ctaText: "Shop Now" }),
+      );
+
+      expect(markup).not.toContain('role="img"');
+      expect(markup).toContain('role="group"');
+      expect(markup).toContain(">Summer Sale<");
+      expect(markup).toContain(">Shop Now<");
     });
   });
 
@@ -277,9 +306,11 @@ describe("createAdRenderer", () => {
   describe("safe degradation (FR-010)", () => {
     it("does not throw and produces safe markup when resolvedRender is missing entirely", () => {
       const ad: AdCandidate = { creative: {}, width: 300, height: 250 };
+      let markup = "";
 
-      expect(() => renderAndGetSrcdoc(ad)).not.toThrow();
-      const markup = renderAndGetSrcdoc(ad);
+      expect(() => {
+        markup = renderAndGetSrcdoc(ad);
+      }).not.toThrow();
       expect(markup).not.toContain("undefined");
       expect(markup).not.toContain("null");
       expect(markup).not.toContain("<a ");

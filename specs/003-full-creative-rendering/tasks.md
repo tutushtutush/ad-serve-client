@@ -283,3 +283,52 @@ syntax (commas, quotes) still passes through correctly. Re-verified after fixes:
 69-of-69 unit tests clean, and the real live ad (T003's) still renders correctly end-to-end —
 logo, placeholder, clickable link, and now a properly un-sandboxed landing page — with no
 injected CSS reaching an actual `style` attribute.
+
+### Round 2
+
+A second review pass surfaced 9 findings. 6 were confirmed and fixed; 3 were judged plausible but
+out of this PR's scope and are recorded here rather than fixed reflexively:
+
+Fixed:
+- **`src/renderer/adRenderer.ts`** (most severe — a real regression, not a style nitpick): the
+  non-interactive wrapper (`isLinked: false`) used `role="img"` while still containing the
+  headline and CTA `<span>` text as real descendants. Per ARIA's `img` role semantics this
+  flattens all descendant content into a single opaque image for assistive tech — the visible
+  headline/CTA text was never announced to screen reader users. Fixed by switching to
+  `role="group"`, which lets the descendants' own text remain in the accessibility tree.
+- **`src/renderer/adRenderer.ts`**: `wrapperTag`/`wrapperAttrs` were derived via two independent
+  ternaries on the same `safeHref` condition, risking a future edit diverging one without the
+  other into a mismatched open/close tag. Fixed by deriving both together as a single `{tag,
+  attrs}` value.
+- **`src/renderer/adRenderer.ts`**: `hasLogoImage`/`hasBackgroundImage` each repeated an identical
+  three-part boolean+string-type+length check verbatim. Extracted into a shared `hasResolvedImage`
+  helper.
+- **`src/renderer/adRenderer.ts`**: `asSafeCssValue`'s character-blocklist approach only closes
+  known injection characters, not the whole class of risk. Added an allowlist-based
+  `asSafeCssColor` (hex / `rgb()`/`rgba()` / `hsl()`/`hsla()` / bare alphabetic keyword) used for
+  all color fields, since color has a small, well-known closed grammar unlike font-family (kept on
+  the existing blocklist, since font names are arbitrary and harder to allowlist precisely).
+- **`tests/unit/renderer/adRenderer.test.ts`**: added a wrong-typed
+  `hasBackgroundImage`/`backgroundImageDataUrl` regression test, matching the equivalent coverage
+  the logo image already had.
+- **`tests/unit/renderer/adRenderer.test.ts`**: the "resolvedRender missing entirely" test rendered
+  the same input twice (once to assert no throw, again to capture markup for further assertions).
+  Fixed to render once and reuse the result.
+
+Deferred (plausible, but out of this PR's scope):
+- **`src/client/adDecisionClient.ts`**: `isAdCandidate` still requires `candidate.creative` to be a
+  non-null object even though the renderer no longer reads any field from it. The current
+  ad-serve-api contract still guarantees `creative`'s presence unchanged (feature 006's addendum),
+  so this isn't a live bug — only a coupling worth revisiting if that contract ever changes.
+- **`src/types.ts`**: `AdCreative`'s rendering fields (colors, fonts, image URLs) are now unused by
+  the renderer, duplicating concepts now captured on `ResolvedAdCreativeRender`. This is an
+  accepted consequence of the deliberately additive, backward-compatible migration (both fields
+  coexist; `creative` remains for any other opaque pass-through use), not something to unwind in
+  this PR.
+- **`src/renderer/adRenderer.ts`**: the logo/background `<img>` elements are hardcoded to `alt=""`,
+  with no per-image accessible description carried over from the old `AdCreative.altText` concept.
+  `ResolvedAdCreativeRender` has no equivalent field — this is an upstream contract gap
+  (ad-serve-api/adconfig), not something ad-serve-client can fix by inventing a field unilaterally.
+
+Re-verified after round-2 fixes: lint/typecheck/73-of-73 unit tests clean, rebuilt bundle
+redeployed to eventpulse, and the real live ad still renders correctly end-to-end.

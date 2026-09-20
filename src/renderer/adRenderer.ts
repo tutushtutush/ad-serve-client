@@ -31,6 +31,26 @@ function asSafeCssValue(value: unknown, fallback: string): string {
   return escapeForMarkup(isSafe ? str : fallback);
 }
 
+// Colors have a closed, well-known grammar, so unlike font-family (arbitrary
+// names, hard to allowlist without rejecting legitimate values) they can be
+// validated by allowlist rather than blocklist — closing off the whole class
+// of "unknown future bypass character" risk, not just the characters known
+// today (code review round 2).
+const SAFE_CSS_COLOR = /^(#[0-9a-fA-F]{3,8}|rgba?\([\d.%,\s]+\)|hsla?\([\d.%,\s]+\)|[a-zA-Z]+)$/;
+
+function asSafeCssColor(value: unknown, fallback: string): string {
+  const str = asSafeString(value);
+  const isSafe = SAFE_CSS_COLOR.test(str);
+  return escapeForMarkup(isSafe ? str : fallback);
+}
+
+// Both the logo and background image share the same "is this actually
+// usable" rule: the enable flag is on, and the data URL is a non-empty
+// string (code review round 2 — was duplicated verbatim at each call site).
+function hasResolvedImage(flag: unknown, dataUrl: unknown): boolean {
+  return asSafeBoolean(flag, false) && typeof dataUrl === "string" && dataUrl.length > 0;
+}
+
 // Only allow http(s) links — linkUrl is external, untrusted data, and
 // rendering it as an href must never permit a javascript: (or other) scheme
 // escape, regardless of what isLinked says (FR-008). Returns null (not a
@@ -62,20 +82,17 @@ function buildCreativeMarkup(ad: AdCandidate): string {
   // Defaults mirror adconfig's own preview defaults (white headline text,
   // sky-blue CTA text) so a degraded/unset case still looks intentional
   // rather than arbitrary.
-  const headlineColor = asSafeCssValue(r.headlineTextColor, "#ffffff");
+  const headlineColor = asSafeCssColor(r.headlineTextColor, "#ffffff");
   const headlineFont = asSafeCssValue(r.headlineFontFamily, "inherit");
-  const ctaColor = asSafeCssValue(r.ctaTextColor, "#0369a1");
+  const ctaColor = asSafeCssColor(r.ctaTextColor, "#0369a1");
   const ctaFont = asSafeCssValue(r.ctaFontFamily, "inherit");
   // Unlike the logo, the CTA always has a background — no enable/disable
   // flag (FR-004, US3).
-  const ctaBackground = asSafeCssValue(r.ctaBackgroundColor, "#ffffff");
+  const ctaBackground = asSafeCssColor(r.ctaBackgroundColor, "#ffffff");
 
-  const hasLogoImage =
-    asSafeBoolean(r.hasLogoImage, false) &&
-    typeof r.logoImageDataUrl === "string" &&
-    r.logoImageDataUrl.length > 0;
+  const hasLogoImage = hasResolvedImage(r.hasLogoImage, r.logoImageDataUrl);
   const logoBackgroundEnabled = asSafeBoolean(r.logoBackgroundEnabled, true);
-  const logoBackgroundColor = asSafeCssValue(r.logoBackgroundColor, "#ffffff");
+  const logoBackgroundColor = asSafeCssColor(r.logoBackgroundColor, "#ffffff");
   const logo = hasLogoImage
     ? `<div style="display:inline-flex;align-items:center;overflow:hidden;border-radius:4px;padding:2px 5px;${
         logoBackgroundEnabled ? `background-color:${logoBackgroundColor};` : ""
@@ -84,10 +101,7 @@ function buildCreativeMarkup(ad: AdCandidate): string {
       </div>`
     : "";
 
-  const hasBackgroundImage =
-    asSafeBoolean(r.hasBackgroundImage, false) &&
-    typeof r.backgroundImageDataUrl === "string" &&
-    r.backgroundImageDataUrl.length > 0;
+  const hasBackgroundImage = hasResolvedImage(r.hasBackgroundImage, r.backgroundImageDataUrl);
   // If iconSize is missing/invalid, compute the same formula adconfig itself
   // uses (min(width, height) / 3) so the degraded case still looks
   // consistent with the normal one (research.md).
@@ -105,10 +119,17 @@ function buildCreativeMarkup(ad: AdCandidate): string {
 
   const isLinked = asSafeBoolean(r.isLinked, false);
   const safeHref = isLinked ? toSafeHref(asSafeString(r.linkUrl)) : null;
-  const wrapperTag = safeHref ? "a" : "div";
-  const wrapperAttrs = safeHref
-    ? `href="${escapeForMarkup(safeHref)}" target="_blank" rel="noopener noreferrer"`
-    : `role="img"`;
+  // tag and attrs are derived together, not via separate parallel ternaries
+  // on the same condition, so they can never diverge into a mismatched
+  // open/close tag pair (code review round 2). The non-interactive case uses
+  // role="group" rather than role="img": the wrapper's own descendants
+  // (headline, CTA) are real, meaningful text, and role="img" would flatten
+  // them out of the accessibility tree as if the whole thing were one opaque
+  // image, silently hiding that text from screen readers (code review
+  // round 2 — a real regression, not merely a style preference).
+  const wrapper = safeHref
+    ? { tag: "a", attrs: `href="${escapeForMarkup(safeHref)}" target="_blank" rel="noopener noreferrer"` }
+    : { tag: "div", attrs: `role="group"` };
   const ariaAttr = ariaLabel ? ` aria-label="${ariaLabel}"` : "";
 
   // Layout mirrors adconfig's own preview (research.md): background layer,
@@ -118,14 +139,14 @@ function buildCreativeMarkup(ad: AdCandidate): string {
   // interactive content inside this wrapper's own <a> would be invalid
   // HTML5 and leaves keyboard/screen-reader activation undefined).
   return `<!DOCTYPE html><html><body style="margin:0;">
-    <${wrapperTag} ${wrapperAttrs}${ariaAttr} style="position:relative;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;width:100%;height:100%;padding:8px;overflow:hidden;text-decoration:none;background:linear-gradient(135deg,#7dd3fc,#0284c7);">
+    <${wrapper.tag} ${wrapper.attrs}${ariaAttr} style="position:relative;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;width:100%;height:100%;padding:8px;overflow:hidden;text-decoration:none;background:linear-gradient(135deg,#7dd3fc,#0284c7);">
       ${backgroundLayer}
       <div style="position:relative;display:flex;align-items:flex-start;">${logo}</div>
       <div style="position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;">
         <span style="font-size:14px;font-weight:700;color:${headlineColor};font-family:${headlineFont};">${headline}</span>
         <span role="button" style="border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;color:${ctaColor};background-color:${ctaBackground};font-family:${ctaFont};">${ctaText}</span>
       </div>
-    </${wrapperTag}>
+    </${wrapper.tag}>
   </body></html>`;
 }
 
