@@ -37,6 +37,18 @@ describe("createAdRenderer", () => {
     expect(iframe?.getAttribute("height")).toBe("250");
   });
 
+  it("gives html and body an explicit height so the wrapper's height:100% fills the iframe (bug fix)", () => {
+    // A percentage height only resolves against an ancestor with a
+    // non-auto height. Without height:100% on <html>/<body> here, the
+    // creative wrapper's own height:100% silently computes as auto and
+    // the ad collapses to its content's height instead of filling the
+    // iframe, leaving dead space below it.
+    const markup = renderAndGetSrcdoc(makeAdWithResolvedRender());
+
+    expect(markup).toMatch(/<html[^>]*style="[^"]*height:100%/);
+    expect(markup).toMatch(/<body[^>]*style="[^"]*height:100%/);
+  });
+
   describe("logo (US1)", () => {
     it("renders the logo when hasLogoImage and logoImageDataUrl are set", () => {
       const markup = renderAndGetSrcdoc(
