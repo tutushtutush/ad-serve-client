@@ -1,43 +1,113 @@
 import { escapeForMarkup } from "../utils/escapeForMarkup";
-import type { AdCandidate, AdCreative } from "../types";
+import type { AdCandidate, ResolvedAdCreativeRender } from "../types";
 
-// creative's fields are opaque and optional (types.ts) — ad-serve-api only
-// includes whatever a campaign actually set, not every field backfilled
-// with a default. Coerce anything non-string (including undefined/null) to
-// "" before escaping, so a sparse or unexpectedly-shaped creative degrades
-// to blank text/a safe fallback instead of crashing.
+// resolvedRender's fields are opaque and optional (types.ts) — a missing
+// field, a missing resolvedRender entirely, or a wrong-typed field must
+// degrade safely rather than crash or produce broken markup (FR-010).
+// Coerce anything non-string to "" before escaping.
 function asSafeString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-// Only allow http(s) links — the creative's linkUrl is external, untrusted
-// data, and rendering it as an href must never permit a javascript: (or
-// other) scheme escape.
-function toSafeHref(url: string): string {
-  return /^https?:\/\//i.test(url) ? url : "#";
+function asSafeBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
 }
 
-function buildCreativeMarkup(creative: AdCreative): string {
-  const headline = escapeForMarkup(asSafeString(creative.headline));
-  const ctaText = escapeForMarkup(asSafeString(creative.ctaText));
-  const altText = escapeForMarkup(asSafeString(creative.altText));
-  const href = escapeForMarkup(toSafeHref(asSafeString(creative.linkUrl)));
-  const backgroundImageDataUrl = asSafeString(creative.backgroundImageDataUrl);
-  const image = backgroundImageDataUrl
-    ? `<img src="${escapeForMarkup(backgroundImageDataUrl)}" alt="${altText}" style="display:block;width:100%;height:100%;object-fit:cover;" />`
+function asSafePositiveNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+// Only allow http(s) links — linkUrl is external, untrusted data, and
+// rendering it as an href must never permit a javascript: (or other) scheme
+// escape, regardless of what isLinked says (FR-008). Returns null (not a
+// "#" fallback) so the caller can tell "unsafe/absent" apart from "safe" and
+// fall back to a non-interactive wrapper instead of a dead link.
+function toSafeHref(url: string): string | null {
+  return /^https?:\/\//i.test(url) ? url : null;
+}
+
+// A small, generic "image" glyph for the background placeholder — hand-drawn
+// rather than pulled from an icon library, which wouldn't be portable into a
+// plain HTML string anyway (research.md).
+function buildPlaceholderIcon(size: number): string {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <rect x="2" y="4" width="20" height="16" rx="2" stroke="#ffffff" stroke-opacity="0.55" stroke-width="1.6"/>
+    <circle cx="8.5" cy="10" r="1.6" stroke="#ffffff" stroke-opacity="0.55" stroke-width="1.6"/>
+    <path d="M4 16l5-4.5 3.5 3 3-2.5L20 16" stroke="#ffffff" stroke-opacity="0.55" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+
+function buildCreativeMarkup(ad: AdCandidate): string {
+  const r: ResolvedAdCreativeRender =
+    typeof ad.resolvedRender === "object" && ad.resolvedRender !== null ? ad.resolvedRender : {};
+
+  const headline = escapeForMarkup(asSafeString(r.headlineText));
+  const ctaText = escapeForMarkup(asSafeString(r.ctaText));
+  const ariaLabel = escapeForMarkup(asSafeString(r.ariaLabel));
+
+  // Defaults mirror adconfig's own preview defaults (white headline text,
+  // sky-blue CTA text) so a degraded/unset case still looks intentional
+  // rather than arbitrary.
+  const headlineColor = escapeForMarkup(asSafeString(r.headlineTextColor) || "#ffffff");
+  const headlineFont = escapeForMarkup(asSafeString(r.headlineFontFamily) || "inherit");
+  const ctaColor = escapeForMarkup(asSafeString(r.ctaTextColor) || "#0369a1");
+  const ctaFont = escapeForMarkup(asSafeString(r.ctaFontFamily) || "inherit");
+  // Unlike the logo, the CTA always has a background — no enable/disable
+  // flag (FR-004, US3).
+  const ctaBackground = escapeForMarkup(asSafeString(r.ctaBackgroundColor) || "#ffffff");
+
+  const hasLogoImage =
+    asSafeBoolean(r.hasLogoImage, false) &&
+    typeof r.logoImageDataUrl === "string" &&
+    r.logoImageDataUrl.length > 0;
+  const logoBackgroundEnabled = asSafeBoolean(r.logoBackgroundEnabled, true);
+  const logoBackgroundColor = escapeForMarkup(asSafeString(r.logoBackgroundColor) || "#ffffff");
+  const logo = hasLogoImage
+    ? `<div style="display:inline-flex;align-items:center;overflow:hidden;border-radius:4px;padding:2px 5px;${
+        logoBackgroundEnabled ? `background-color:${logoBackgroundColor};` : ""
+      }">
+        <img src="${escapeForMarkup(asSafeString(r.logoImageDataUrl))}" alt="" style="height:14px;max-width:40px;object-fit:contain;display:block;" />
+      </div>`
     : "";
 
-  // The CTA is rendered as a <span> styled to look like a button, not a real
-  // <button>: nesting interactive content (a <button>) inside another
-  // interactive element (this <a>) is invalid HTML5 and leaves keyboard/
-  // screen-reader activation behavior undefined. A single <a> wrapping
-  // everything keeps one unambiguous, fully-keyboard-accessible target.
+  const hasBackgroundImage =
+    asSafeBoolean(r.hasBackgroundImage, false) &&
+    typeof r.backgroundImageDataUrl === "string" &&
+    r.backgroundImageDataUrl.length > 0;
+  // If iconSize is missing/invalid, compute the same formula adconfig itself
+  // uses (min(width, height) / 3) so the degraded case still looks
+  // consistent with the normal one (research.md).
+  const iconSize = asSafePositiveNumber(r.iconSize) ?? Math.min(ad.width, ad.height) / 3;
+  const backgroundStyle = hasBackgroundImage
+    ? `background-image:url('${escapeForMarkup(asSafeString(r.backgroundImageDataUrl))}');background-size:cover;background-position:center;`
+    : "background:linear-gradient(135deg,#7dd3fc,#0284c7);";
+  const placeholder = hasBackgroundImage
+    ? ""
+    : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">${buildPlaceholderIcon(iconSize)}</div>`;
+
+  const isLinked = asSafeBoolean(r.isLinked, false);
+  const safeHref = isLinked ? toSafeHref(asSafeString(r.linkUrl)) : null;
+  const wrapperTag = safeHref ? "a" : "div";
+  const wrapperAttrs = safeHref
+    ? `href="${escapeForMarkup(safeHref)}" target="_blank" rel="noopener noreferrer"`
+    : `role="img"`;
+  const ariaAttr = ariaLabel ? ` aria-label="${ariaLabel}"` : "";
+
+  // Layout mirrors adconfig's own preview (research.md): background layer,
+  // then a top row (logo only — the disclosure icon is deliberately
+  // omitted, it's non-data-driven chrome) and a bottom block (headline, then
+  // the CTA as a <span role="button"> rather than a real <button> — nesting
+  // interactive content inside this wrapper's own <a> would be invalid
+  // HTML5 and leaves keyboard/screen-reader activation undefined).
   return `<!DOCTYPE html><html><body style="margin:0;">
-    <a href="${href}" target="_blank" rel="noopener noreferrer" style="display:block;height:100%;text-decoration:none;">
-      ${image}
-      <div>${headline}</div>
-      <span role="button">${ctaText}</span>
-    </a>
+    <${wrapperTag} ${wrapperAttrs}${ariaAttr} style="position:relative;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;width:100%;height:100%;padding:8px;overflow:hidden;text-decoration:none;${backgroundStyle}">
+      ${placeholder}
+      <div style="position:relative;display:flex;align-items:flex-start;">${logo}</div>
+      <div style="position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;">
+        <span style="font-size:14px;font-weight:700;color:${headlineColor};font-family:${headlineFont};">${headline}</span>
+        <span role="button" style="border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;color:${ctaColor};background-color:${ctaBackground};font-family:${ctaFont};">${ctaText}</span>
+      </div>
+    </${wrapperTag}>
   </body></html>`;
 }
 
@@ -51,7 +121,7 @@ export function createAdRenderer(documentImpl: Document) {
     iframe.setAttribute("height", String(ad.height));
     iframe.setAttribute("frameborder", "0");
     iframe.setAttribute("scrolling", "no");
-    iframe.setAttribute("srcdoc", buildCreativeMarkup(ad.creative));
+    iframe.setAttribute("srcdoc", buildCreativeMarkup(ad));
     slotElement.appendChild(iframe);
   }
 
