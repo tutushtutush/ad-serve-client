@@ -1,43 +1,152 @@
 import { escapeForMarkup } from "../utils/escapeForMarkup";
-import type { AdCandidate, AdCreative } from "../types";
+import type { AdCandidate, ResolvedAdCreativeRender } from "../types";
 
-// creative's fields are opaque and optional (types.ts) — ad-serve-api only
-// includes whatever a campaign actually set, not every field backfilled
-// with a default. Coerce anything non-string (including undefined/null) to
-// "" before escaping, so a sparse or unexpectedly-shaped creative degrades
-// to blank text/a safe fallback instead of crashing.
+// resolvedRender's fields are opaque and optional (types.ts) — a missing
+// field, a missing resolvedRender entirely, or a wrong-typed field must
+// degrade safely rather than crash or produce broken markup (FR-010).
+// Coerce anything non-string to "" before escaping.
 function asSafeString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-// Only allow http(s) links — the creative's linkUrl is external, untrusted
-// data, and rendering it as an href must never permit a javascript: (or
-// other) scheme escape.
-function toSafeHref(url: string): string {
-  return /^https?:\/\//i.test(url) ? url : "#";
+function asSafeBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
 }
 
-function buildCreativeMarkup(creative: AdCreative): string {
-  const headline = escapeForMarkup(asSafeString(creative.headline));
-  const ctaText = escapeForMarkup(asSafeString(creative.ctaText));
-  const altText = escapeForMarkup(asSafeString(creative.altText));
-  const href = escapeForMarkup(toSafeHref(asSafeString(creative.linkUrl)));
-  const backgroundImageDataUrl = asSafeString(creative.backgroundImageDataUrl);
-  const image = backgroundImageDataUrl
-    ? `<img src="${escapeForMarkup(backgroundImageDataUrl)}" alt="${altText}" style="display:block;width:100%;height:100%;object-fit:cover;" />`
+function asSafePositiveNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+// A resolved color/font value is placed directly into a CSS property value
+// with no surrounding quotes — HTML-escaping only guards the HTML
+// attribute-value context, it does nothing to stop the *decoded* value from
+// injecting new CSS once the browser's HTML parser hands the style
+// attribute's content to the CSS engine. Reject anything that could break
+// out of a single CSS value: a semicolon starts a new declaration, braces
+// could break out of the rule entirely, and a CSS comment could hide/reveal
+// characters unpredictably. Falls back to the given safe default otherwise.
+function asSafeCssValue(value: unknown, fallback: string): string {
+  const str = asSafeString(value);
+  const isSafe = str.length > 0 && !/[;{}]/.test(str) && !str.includes("/*");
+  return escapeForMarkup(isSafe ? str : fallback);
+}
+
+// Colors have a closed, well-known grammar, so unlike font-family (arbitrary
+// names, hard to allowlist without rejecting legitimate values) they can be
+// validated by allowlist rather than blocklist — closing off the whole class
+// of "unknown future bypass character" risk, not just the characters known
+// today (code review round 2).
+const SAFE_CSS_COLOR = /^(#[0-9a-fA-F]{3,8}|rgba?\([\d.%,\s]+\)|hsla?\([\d.%,\s]+\)|[a-zA-Z]+)$/;
+
+function asSafeCssColor(value: unknown, fallback: string): string {
+  const str = asSafeString(value);
+  const isSafe = SAFE_CSS_COLOR.test(str);
+  return escapeForMarkup(isSafe ? str : fallback);
+}
+
+// Both the logo and background image share the same "is this actually
+// usable" rule: the enable flag is on, and the data URL is a non-empty
+// string (code review round 2 — was duplicated verbatim at each call site).
+function hasResolvedImage(flag: unknown, dataUrl: unknown): boolean {
+  return asSafeBoolean(flag, false) && typeof dataUrl === "string" && dataUrl.length > 0;
+}
+
+// Only allow http(s) links — linkUrl is external, untrusted data, and
+// rendering it as an href must never permit a javascript: (or other) scheme
+// escape, regardless of what isLinked says (FR-008). Returns null (not a
+// "#" fallback) so the caller can tell "unsafe/absent" apart from "safe" and
+// fall back to a non-interactive wrapper instead of a dead link.
+function toSafeHref(url: string): string | null {
+  return /^https?:\/\//i.test(url) ? url : null;
+}
+
+// A small, generic "image" glyph for the background placeholder — hand-drawn
+// rather than pulled from an icon library, which wouldn't be portable into a
+// plain HTML string anyway (research.md).
+function buildPlaceholderIcon(size: number): string {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <rect x="2" y="4" width="20" height="16" rx="2" stroke="#ffffff" stroke-opacity="0.55" stroke-width="1.6"/>
+    <circle cx="8.5" cy="10" r="1.6" stroke="#ffffff" stroke-opacity="0.55" stroke-width="1.6"/>
+    <path d="M4 16l5-4.5 3.5 3 3-2.5L20 16" stroke="#ffffff" stroke-opacity="0.55" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+
+function buildCreativeMarkup(ad: AdCandidate): string {
+  const r: ResolvedAdCreativeRender =
+    typeof ad.resolvedRender === "object" && ad.resolvedRender !== null ? ad.resolvedRender : {};
+
+  const headline = escapeForMarkup(asSafeString(r.headlineText));
+  const ctaText = escapeForMarkup(asSafeString(r.ctaText));
+  const ariaLabel = escapeForMarkup(asSafeString(r.ariaLabel));
+
+  // Defaults mirror adconfig's own preview defaults (white headline text,
+  // sky-blue CTA text) so a degraded/unset case still looks intentional
+  // rather than arbitrary.
+  const headlineColor = asSafeCssColor(r.headlineTextColor, "#ffffff");
+  const headlineFont = asSafeCssValue(r.headlineFontFamily, "inherit");
+  const ctaColor = asSafeCssColor(r.ctaTextColor, "#0369a1");
+  const ctaFont = asSafeCssValue(r.ctaFontFamily, "inherit");
+  // Unlike the logo, the CTA always has a background — no enable/disable
+  // flag (FR-004, US3).
+  const ctaBackground = asSafeCssColor(r.ctaBackgroundColor, "#ffffff");
+
+  const hasLogoImage = hasResolvedImage(r.hasLogoImage, r.logoImageDataUrl);
+  const logoBackgroundEnabled = asSafeBoolean(r.logoBackgroundEnabled, true);
+  const logoBackgroundColor = asSafeCssColor(r.logoBackgroundColor, "#ffffff");
+  const logo = hasLogoImage
+    ? `<div style="display:inline-flex;align-items:center;overflow:hidden;border-radius:4px;padding:2px 5px;${
+        logoBackgroundEnabled ? `background-color:${logoBackgroundColor};` : ""
+      }">
+        <img src="${escapeForMarkup(asSafeString(r.logoImageDataUrl))}" alt="" style="height:14px;max-width:40px;object-fit:contain;display:block;" />
+      </div>`
     : "";
 
-  // The CTA is rendered as a <span> styled to look like a button, not a real
-  // <button>: nesting interactive content (a <button>) inside another
-  // interactive element (this <a>) is invalid HTML5 and leaves keyboard/
-  // screen-reader activation behavior undefined. A single <a> wrapping
-  // everything keeps one unambiguous, fully-keyboard-accessible target.
+  const hasBackgroundImage = hasResolvedImage(r.hasBackgroundImage, r.backgroundImageDataUrl);
+  // If iconSize is missing/invalid, compute the same formula adconfig itself
+  // uses (min(width, height) / 3) so the degraded case still looks
+  // consistent with the normal one (research.md).
+  const iconSize = asSafePositiveNumber(r.iconSize) ?? Math.min(ad.width, ad.height) / 3;
+  // Rendered as an <img> (like the logo already is), not a CSS
+  // `background-image: url(...)`: embedding untrusted data inside a quoted
+  // CSS string via string concatenation is unsafe — HTML-escaping a `'`
+  // survives the browser's HTML-attribute-value entity decoding and comes
+  // back as a literal quote by the time the CSS engine parses the style
+  // attribute's content, letting it break out of the url() token. An <img
+  // src> has no such second parsing pass to exploit.
+  const backgroundLayer = hasBackgroundImage
+    ? `<img src="${escapeForMarkup(asSafeString(r.backgroundImageDataUrl))}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" />`
+    : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">${buildPlaceholderIcon(iconSize)}</div>`;
+
+  const isLinked = asSafeBoolean(r.isLinked, false);
+  const safeHref = isLinked ? toSafeHref(asSafeString(r.linkUrl)) : null;
+  // tag and attrs are derived together, not via separate parallel ternaries
+  // on the same condition, so they can never diverge into a mismatched
+  // open/close tag pair (code review round 2). The non-interactive case uses
+  // role="group" rather than role="img": the wrapper's own descendants
+  // (headline, CTA) are real, meaningful text, and role="img" would flatten
+  // them out of the accessibility tree as if the whole thing were one opaque
+  // image, silently hiding that text from screen readers (code review
+  // round 2 — a real regression, not merely a style preference).
+  const wrapper = safeHref
+    ? { tag: "a", attrs: `href="${escapeForMarkup(safeHref)}" target="_blank" rel="noopener noreferrer"` }
+    : { tag: "div", attrs: `role="group"` };
+  const ariaAttr = ariaLabel ? ` aria-label="${ariaLabel}"` : "";
+
+  // Layout mirrors adconfig's own preview (research.md): background layer,
+  // then a top row (logo only — the disclosure icon is deliberately
+  // omitted, it's non-data-driven chrome) and a bottom block (headline, then
+  // the CTA as a <span role="button"> rather than a real <button> — nesting
+  // interactive content inside this wrapper's own <a> would be invalid
+  // HTML5 and leaves keyboard/screen-reader activation undefined).
   return `<!DOCTYPE html><html><body style="margin:0;">
-    <a href="${href}" target="_blank" rel="noopener noreferrer" style="display:block;height:100%;text-decoration:none;">
-      ${image}
-      <div>${headline}</div>
-      <span role="button">${ctaText}</span>
-    </a>
+    <${wrapper.tag} ${wrapper.attrs}${ariaAttr} style="position:relative;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;width:100%;height:100%;padding:8px;overflow:hidden;text-decoration:none;background:linear-gradient(135deg,#7dd3fc,#0284c7);">
+      ${backgroundLayer}
+      <div style="position:relative;display:flex;align-items:flex-start;">${logo}</div>
+      <div style="position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;">
+        <span style="font-size:14px;font-weight:700;color:${headlineColor};font-family:${headlineFont};">${headline}</span>
+        <span role="button" style="border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;color:${ctaColor};background-color:${ctaBackground};font-family:${ctaFont};">${ctaText}</span>
+      </div>
+    </${wrapper.tag}>
   </body></html>`;
 }
 
@@ -46,12 +155,17 @@ export function createAdRenderer(documentImpl: Document) {
     const iframe = documentImpl.createElement("iframe");
     // Narrowest sandbox that satisfies a static text/image/link creative
     // (research.md): no allow-scripts, no allow-same-origin.
-    iframe.setAttribute("sandbox", "allow-popups");
+    // allow-popups-to-escape-sandbox is required alongside allow-popups: per
+    // the WHATWG popup-inheritance rule, a popup opened from a sandboxed
+    // frame otherwise inherits that sandbox's restrictions itself, which
+    // would break the advertiser's own landing page (no scripts, unique
+    // origin) the moment a visitor actually clicks through.
+    iframe.setAttribute("sandbox", "allow-popups allow-popups-to-escape-sandbox");
     iframe.setAttribute("width", String(ad.width));
     iframe.setAttribute("height", String(ad.height));
     iframe.setAttribute("frameborder", "0");
     iframe.setAttribute("scrolling", "no");
-    iframe.setAttribute("srcdoc", buildCreativeMarkup(ad.creative));
+    iframe.setAttribute("srcdoc", buildCreativeMarkup(ad));
     slotElement.appendChild(iframe);
   }
 

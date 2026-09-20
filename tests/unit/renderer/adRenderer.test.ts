@@ -1,5 +1,14 @@
 import { createAdRenderer } from "../../../src/renderer/adRenderer";
-import { makeAd } from "../fixtures/adCreative";
+import { makeAdWithResolvedRender } from "../fixtures/adCreative";
+import type { AdCandidate } from "../../../src/types";
+
+function renderAndGetSrcdoc(ad: AdCandidate): string {
+  document.body.innerHTML = "";
+  const slot = document.createElement("div");
+  document.body.append(slot);
+  createAdRenderer(document).renderAd(slot, ad);
+  return slot.querySelector("iframe")?.getAttribute("srcdoc") ?? "";
+}
 
 describe("createAdRenderer", () => {
   it("appends an iframe with a narrow sandbox and no scripting privileges", () => {
@@ -7,11 +16,11 @@ describe("createAdRenderer", () => {
     const slot = document.createElement("div");
     document.body.append(slot);
 
-    createAdRenderer(document).renderAd(slot, makeAd());
+    createAdRenderer(document).renderAd(slot, makeAdWithResolvedRender());
 
     const iframe = slot.querySelector("iframe");
     expect(iframe).not.toBeNull();
-    expect(iframe?.getAttribute("sandbox")).toBe("allow-popups");
+    expect(iframe?.getAttribute("sandbox")).toBe("allow-popups allow-popups-to-escape-sandbox");
     expect(iframe?.getAttribute("sandbox")).not.toContain("allow-scripts");
     expect(iframe?.getAttribute("sandbox")).not.toContain("allow-same-origin");
   });
@@ -21,92 +30,308 @@ describe("createAdRenderer", () => {
     const slot = document.createElement("div");
     document.body.append(slot);
 
-    createAdRenderer(document).renderAd(slot, makeAd());
+    createAdRenderer(document).renderAd(slot, makeAdWithResolvedRender());
 
     const iframe = slot.querySelector("iframe");
     expect(iframe?.getAttribute("width")).toBe("300");
     expect(iframe?.getAttribute("height")).toBe("250");
   });
 
-  it("escapes creative text fields in the resulting markup", () => {
-    document.body.innerHTML = "";
-    const slot = document.createElement("div");
-    document.body.append(slot);
+  describe("logo (US1)", () => {
+    it("renders the logo when hasLogoImage and logoImageDataUrl are set", () => {
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({ hasLogoImage: true, logoImageDataUrl: "data:image/png;base64,LOGO" }),
+      );
 
-    createAdRenderer(document).renderAd(
-      slot,
-      makeAd({ headline: '<script>alert("x")</script>', ctaText: "A & B" }),
-    );
+      expect(markup).toContain("data:image/png;base64,LOGO");
+    });
 
-    const markup = slot.querySelector("iframe")?.getAttribute("srcdoc") ?? "";
-    expect(markup).not.toContain("<script>alert");
-    expect(markup).toContain("&lt;script&gt;");
-    expect(markup).toContain("A &amp; B");
+    it("renders no logo element when hasLogoImage is false", () => {
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({ hasLogoImage: false, logoImageDataUrl: "data:image/png;base64,LOGO" }),
+      );
+
+      expect(markup).not.toContain("LOGO");
+    });
+
+    it("gives the logo a background when logoBackgroundEnabled is true", () => {
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({
+          hasLogoImage: true,
+          logoImageDataUrl: "data:image/png;base64,X",
+          logoBackgroundEnabled: true,
+          logoBackgroundColor: "#ff00ff",
+        }),
+      );
+
+      expect(markup).toContain("background-color:#ff00ff");
+    });
+
+    it("omits the logo's background when logoBackgroundEnabled is false", () => {
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({
+          hasLogoImage: true,
+          logoImageDataUrl: "data:image/png;base64,X",
+          logoBackgroundEnabled: false,
+          logoBackgroundColor: "#ff00ff",
+        }),
+      );
+
+      expect(markup).not.toContain("#ff00ff");
+    });
   });
 
-  it("never nests a <button> inside the <a> (invalid HTML5)", () => {
-    document.body.innerHTML = "";
-    const slot = document.createElement("div");
-    document.body.append(slot);
+  describe("resolved colors and fonts (US2)", () => {
+    it("applies resolved headline and CTA colors/fonts when set", () => {
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({
+          headlineTextColor: "#123456",
+          headlineFontFamily: "Georgia, serif",
+          ctaTextColor: "#654321",
+          ctaFontFamily: "Courier, monospace",
+        }),
+      );
 
-    createAdRenderer(document).renderAd(slot, makeAd());
+      expect(markup).toContain("color:#123456");
+      expect(markup).toContain("font-family:Georgia, serif");
+      expect(markup).toContain("color:#654321");
+      expect(markup).toContain("font-family:Courier, monospace");
+    });
 
-    const markup = slot.querySelector("iframe")?.getAttribute("srcdoc") ?? "";
-    expect(markup).not.toContain("<button");
-    expect(markup).toContain('role="button"');
+    it("falls back to defaults when colors/fonts are unset", () => {
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({
+          headlineTextColor: undefined,
+          headlineFontFamily: undefined,
+          ctaTextColor: undefined,
+          ctaFontFamily: undefined,
+        }),
+      );
+
+      expect(markup).toContain("font-family:inherit");
+    });
   });
 
-  it("falls back to a safe href when linkUrl isn't http(s)", () => {
-    document.body.innerHTML = "";
-    const slot = document.createElement("div");
-    document.body.append(slot);
+  describe("CTA background (US3)", () => {
+    it("always applies a CTA background color, even a default one", () => {
+      const markup = renderAndGetSrcdoc(makeAdWithResolvedRender({ ctaBackgroundColor: undefined }));
 
-    createAdRenderer(document).renderAd(slot, makeAd({ linkUrl: "javascript:alert(1)" }));
+      expect(markup).toMatch(/background-color:#[0-9a-fA-F]{3,6}/);
+    });
 
-    const markup = slot.querySelector("iframe")?.getAttribute("srcdoc") ?? "";
-    expect(markup).not.toContain("javascript:alert");
-    expect(markup).toContain('href="#"');
+    it("uses the resolved CTA background color when set", () => {
+      const markup = renderAndGetSrcdoc(makeAdWithResolvedRender({ ctaBackgroundColor: "#00ff00" }));
+
+      expect(markup).toContain("background-color:#00ff00");
+    });
   });
 
-  it("does not throw and degrades to blank/safe values when creative fields are missing entirely", () => {
-    document.body.innerHTML = "";
-    const slot = document.createElement("div");
-    document.body.append(slot);
+  describe("background image vs. placeholder (US4)", () => {
+    it("renders the background image when present, with no placeholder", () => {
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({
+          hasBackgroundImage: true,
+          backgroundImageDataUrl: "data:image/png;base64,BG",
+        }),
+      );
 
-    // ad-serve-api only includes fields a campaign actually set (types.ts) —
-    // a sparse creative like this is a normal, expected response shape.
-    const sparseAd = { creative: {}, width: 300, height: 250 };
+      expect(markup).toContain("data:image/png;base64,BG");
+      expect(markup).not.toContain("<svg");
+    });
 
-    expect(() => createAdRenderer(document).renderAd(slot, sparseAd)).not.toThrow();
-    const markup = slot.querySelector("iframe")?.getAttribute("srcdoc") ?? "";
-    expect(markup).toContain('href="#"');
-    expect(markup).not.toContain("undefined");
-    expect(markup).not.toContain("null");
+    it("renders a placeholder when no background image is present, with no background-image style", () => {
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({ hasBackgroundImage: false, backgroundImageDataUrl: undefined }),
+      );
+
+      expect(markup).toContain("<svg");
+      expect(markup).not.toContain("background-image:url");
+    });
+
+    it("sizes the placeholder icon from iconSize when valid", () => {
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({ hasBackgroundImage: false, iconSize: 42 }),
+      );
+
+      expect(markup).toContain('width="42"');
+      expect(markup).toContain('height="42"');
+    });
+
+    it("computes a fallback icon size from the ad's own dimensions when iconSize is invalid", () => {
+      const ad = makeAdWithResolvedRender({ hasBackgroundImage: false, iconSize: -1 });
+      ad.width = 300;
+      ad.height = 150;
+      const markup = renderAndGetSrcdoc(ad);
+
+      // min(300, 150) / 3 = 50
+      expect(markup).toContain('width="50"');
+    });
+
+    it("falls back to the placeholder when hasBackgroundImage/backgroundImageDataUrl are wrong-typed (FR-010)", () => {
+      const ad = {
+        creative: {},
+        width: 300,
+        height: 250,
+        resolvedRender: { hasBackgroundImage: "yes", backgroundImageDataUrl: {} },
+      } as unknown as AdCandidate;
+
+      const markup = renderAndGetSrcdoc(ad);
+
+      expect(markup).toContain("<svg");
+      expect(markup).not.toContain("<img");
+    });
   });
 
-  it("does not throw when a creative field is an unexpected type (e.g. null)", () => {
-    document.body.innerHTML = "";
-    const slot = document.createElement("div");
-    document.body.append(slot);
+  describe("clickability (US5, FR-008)", () => {
+    it("renders a clickable <a> when isLinked is true and linkUrl is a safe http(s) URL", () => {
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }),
+      );
 
-    const malformedAd = makeAd({ headline: null as unknown as string, ctaText: 42 as unknown as string });
+      expect(markup).toContain('<a href="https://example.com/sale"');
+    });
 
-    expect(() => createAdRenderer(document).renderAd(slot, malformedAd)).not.toThrow();
+    it("renders a non-interactive wrapper when isLinked is false", () => {
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({ isLinked: false, linkUrl: "https://example.com/sale" }),
+      );
+
+      expect(markup).not.toContain("<a ");
+      expect(markup).toContain('role="group"');
+    });
+
+    it("does not become clickable when isLinked is true but linkUrl is an unsafe scheme", () => {
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({ isLinked: true, linkUrl: "javascript:alert(1)" }),
+      );
+
+      expect(markup).not.toContain("<a ");
+      expect(markup).not.toContain("javascript:alert");
+    });
+
+    it("does not hide the headline/CTA text from the accessibility tree on a non-interactive wrapper (code review fix)", () => {
+      // role="img" on a wrapper that still contains real text descendants
+      // flattens them out of the accessibility tree, as if the whole thing
+      // were one opaque image — role="group" keeps the headline/CTA spans'
+      // own text exposed to assistive tech.
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({ isLinked: false, headlineText: "Summer Sale", ctaText: "Shop Now" }),
+      );
+
+      expect(markup).not.toContain('role="img"');
+      expect(markup).toContain('role="group"');
+      expect(markup).toContain(">Summer Sale<");
+      expect(markup).toContain(">Shop Now<");
+    });
   });
 
-  it("omits the image entirely when backgroundImageDataUrl is a truthy non-string, instead of rendering a broken empty src", () => {
-    document.body.innerHTML = "";
-    const slot = document.createElement("div");
-    document.body.append(slot);
+  describe("escaping (FR-009)", () => {
+    it("escapes headline, CTA text, and aria-label", () => {
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({
+          headlineText: '<script>alert("x")</script>',
+          ctaText: "A & B",
+          ariaLabel: '"quoted" label',
+        }),
+      );
 
-    // A truthy but non-string value (e.g. a malformed upstream response) —
-    // must not produce <img src="">, which the browser treats as a broken
-    // image / unexpected request.
-    const malformedAd = makeAd({ backgroundImageDataUrl: 42 as unknown as string });
+      expect(markup).not.toContain("<script>alert");
+      expect(markup).toContain("&lt;script&gt;");
+      expect(markup).toContain("A &amp; B");
+      expect(markup).toContain("&quot;quoted&quot; label");
+    });
+  });
 
-    createAdRenderer(document).renderAd(slot, malformedAd);
+  describe("CSS/URL injection safety (code review fix)", () => {
+    it("does not let a quote in backgroundImageDataUrl break out of its CSS context", () => {
+      // The background image is rendered as an <img src>, not a CSS
+      // url(...) — so there is no CSS string for a quote to break out of at
+      // all. Assert the injected payload never appears as applied CSS.
+      const payload = "https://x/y' );position:fixed;top:0;left:0;background:#000;--z='";
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({ hasBackgroundImage: true, backgroundImageDataUrl: payload }),
+      );
 
-    const markup = slot.querySelector("iframe")?.getAttribute("srcdoc") ?? "";
-    expect(markup).not.toContain("<img");
+      expect(markup).not.toContain("background-image:url");
+      expect(markup).toContain("<img");
+      // The payload is safely confined to the <img>'s own src attribute
+      // (HTML-escaped, inert as CSS) — it must never appear as part of any
+      // style="..." attribute's actual applied CSS.
+      const styleAttrs = markup.match(/style="[^"]*"/g) ?? [];
+      for (const style of styleAttrs) {
+        expect(style).not.toContain("position:fixed");
+      }
+    });
+
+    it("does not let a semicolon in a resolved color/font value inject new CSS declarations", () => {
+      const payload = "white;position:absolute;inset:0;background:#000;z-index:99";
+      const markup = renderAndGetSrcdoc(makeAdWithResolvedRender({ headlineTextColor: payload }));
+
+      expect(markup).not.toContain(payload);
+      expect(markup).not.toContain("position:absolute;inset:0;background:#000");
+      // Falls back to the safe default instead of the unsafe value.
+      expect(markup).toContain("color:#ffffff");
+    });
+
+    it("does not let a CSS comment in a resolved value hide/reveal adjacent declarations", () => {
+      const markup = renderAndGetSrcdoc(makeAdWithResolvedRender({ ctaTextColor: "red/*" }));
+
+      expect(markup).not.toContain("/*");
+      expect(markup).toContain("color:#0369a1"); // falls back to default
+    });
+
+    it("still accepts legitimate font-family values containing commas and quotes", () => {
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({ headlineFontFamily: "Georgia, 'Times New Roman', serif" }),
+      );
+
+      // Single quotes are HTML-entity-escaped (escapeForMarkup applies
+      // uniformly, even though they're harmless inside a double-quoted
+      // attribute) — the browser decodes them back to literal quotes before
+      // the CSS engine sees the value, so this remains valid, correct CSS.
+      expect(markup).toContain("font-family:Georgia, &#39;Times New Roman&#39;, serif");
+    });
+
+    it("opens the advertiser's landing page without inheriting the ad's own sandbox restrictions", () => {
+      document.body.innerHTML = "";
+      const slot = document.createElement("div");
+      document.body.append(slot);
+      createAdRenderer(document).renderAd(slot, makeAdWithResolvedRender());
+
+      const sandbox = slot.querySelector("iframe")?.getAttribute("sandbox") ?? "";
+      expect(sandbox).toContain("allow-popups-to-escape-sandbox");
+    });
+  });
+
+  describe("safe degradation (FR-010)", () => {
+    it("does not throw and produces safe markup when resolvedRender is missing entirely", () => {
+      const ad: AdCandidate = { creative: {}, width: 300, height: 250 };
+      let markup = "";
+
+      expect(() => {
+        markup = renderAndGetSrcdoc(ad);
+      }).not.toThrow();
+      expect(markup).not.toContain("undefined");
+      expect(markup).not.toContain("null");
+      expect(markup).not.toContain("<a ");
+      expect(markup).toContain("<svg");
+    });
+
+    it("does not throw when resolvedRender fields are wrong-typed", () => {
+      const ad = {
+        creative: {},
+        width: 300,
+        height: 250,
+        resolvedRender: {
+          headlineText: 123,
+          hasLogoImage: "yes",
+          logoImageDataUrl: {},
+          isLinked: "true",
+          iconSize: "big",
+        },
+      } as unknown as AdCandidate;
+
+      expect(() => renderAndGetSrcdoc(ad)).not.toThrow();
+    });
   });
 });
