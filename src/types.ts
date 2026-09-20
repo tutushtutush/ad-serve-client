@@ -68,6 +68,17 @@ export interface AdCandidate {
   // Optional: absent on an incomplete/older ad-serve-api response — the
   // degrade-safely case (FR-010, feature 003).
   resolvedRender?: ResolvedAdCreativeRender;
+  // ad-serve-api's identifier for the winning ad config — used to build a click-tracking URL
+  // (feature 004), never for rendering itself. Optional, same degrade-safely treatment as every
+  // other field here: absence falls back to a direct advertiser link, it never blocks rendering.
+  adConfigId?: string;
 }
 
 export type AdDecisionResult = { status: "filled"; ad: AdCandidate } | { status: "empty" };
+
+// Just the two fields needed to build a click URL (feature 004) — not the full
+// AdDecisionRequest: ad-serve-api's /click endpoint doesn't accept country/deviceType.
+export interface PlacementIdentity {
+  platformId: string;
+  adTypeId: string;
+}

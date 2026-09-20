@@ -149,6 +149,31 @@ describe("createAdDecisionClient", () => {
     expect(result).toEqual({ status: "empty" });
   });
 
+  it("passes adConfigId through when present (feature 004 — used for click-URL construction)", async () => {
+    const fetchImpl: FetchLike = jest.fn(async () =>
+      jsonResponse(true, { ad: { creative, width: 300, height: 250, adConfigId: "ad-1" } }),
+    );
+    const client = createAdDecisionClient(fetchImpl, baseUrl);
+
+    const result = await client.requestAd({ platformId: "plat-1", adTypeId: "banner" });
+
+    expect(result).toEqual({
+      status: "filled",
+      ad: { creative, width: 300, height: 250, adConfigId: "ad-1" },
+    });
+  });
+
+  it("still accepts the ad when adConfigId is absent (optional — degrades to a direct link, not a rejected ad)", async () => {
+    const fetchImpl: FetchLike = jest.fn(async () =>
+      jsonResponse(true, { ad: { creative, width: 300, height: 250 } }),
+    );
+    const client = createAdDecisionClient(fetchImpl, baseUrl);
+
+    const result = await client.requestAd({ platformId: "plat-1", adTypeId: "banner" });
+
+    expect(result.status).toBe("filled");
+  });
+
   it("returns empty when the response body isn't valid JSON", async () => {
     const fetchImpl: FetchLike = jest.fn(async () => ({
       ok: true,
