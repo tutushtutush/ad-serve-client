@@ -37,16 +37,22 @@ describe("createAdRenderer", () => {
     expect(iframe?.getAttribute("height")).toBe("250");
   });
 
-  it("gives html and body an explicit height so the wrapper's height:100% fills the iframe (bug fix)", () => {
-    // A percentage height only resolves against an ancestor with a
-    // non-auto height. Without height:100% on <html>/<body> here, the
-    // creative wrapper's own height:100% silently computes as auto and
-    // the ad collapses to its content's height instead of filling the
-    // iframe, leaving dead space below it.
+  it("sizes the wrapper via position:absolute;inset:0 so it fills the iframe regardless of html/body height (bug fix)", () => {
+    // Sizing the wrapper with width/height:100% would require every
+    // ancestor (html, body) to also have a non-auto height for the
+    // percentage to resolve — miss one and the ad silently collapses to
+    // its content's height instead of filling the iframe. inset:0 on an
+    // absolutely positioned element sizes it against the initial
+    // containing block (the iframe's own viewport) directly, with no
+    // ancestor chain to keep in sync.
     const markup = renderAndGetSrcdoc(makeAdWithResolvedRender());
 
-    expect(markup).toMatch(/<html[^>]*style="[^"]*height:100%/);
-    expect(markup).toMatch(/<body[^>]*style="[^"]*height:100%/);
+    // Anchored to the element immediately inside <body> (the wrapper) —
+    // the background-image/placeholder layer nested inside it also uses
+    // position:absolute;inset:0 (unrelated, pre-existing), so an
+    // unanchored match against the whole markup would pass even without
+    // this fix.
+    expect(markup).toMatch(/<body[^>]*>\s*<(?:a|div)[^>]*style="[^"]*position:absolute;inset:0/);
   });
 
   describe("logo (US1)", () => {
