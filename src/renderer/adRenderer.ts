@@ -138,8 +138,15 @@ function buildCreativeMarkup(ad: AdCandidate): string {
   // the CTA as a <span role="button"> rather than a real <button> — nesting
   // interactive content inside this wrapper's own <a> would be invalid
   // HTML5 and leaves keyboard/screen-reader activation undefined).
+  // The wrapper fills the iframe via position:absolute;inset:0 against the
+  // initial containing block (sized by the iframe's own width/height
+  // attributes in renderAd), not via width/height:100% — a percentage
+  // height only resolves through a chain of non-auto-height ancestors, so
+  // that approach would need <html> and <body> to separately opt in too
+  // (and silently break again if a <head> or extra wrapper layer is ever
+  // inserted between them and here).
   return `<!DOCTYPE html><html><body style="margin:0;">
-    <${wrapper.tag} ${wrapper.attrs}${ariaAttr} style="position:relative;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;width:100%;height:100%;padding:8px;overflow:hidden;text-decoration:none;background:linear-gradient(135deg,#7dd3fc,#0284c7);">
+    <${wrapper.tag} ${wrapper.attrs}${ariaAttr} style="position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;padding:8px;overflow:hidden;text-decoration:none;background:linear-gradient(135deg,#7dd3fc,#0284c7);">
       ${backgroundLayer}
       <div style="position:relative;display:flex;align-items:flex-start;">${logo}</div>
       <div style="position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;">
