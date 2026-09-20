@@ -326,6 +326,36 @@ describe("createAdRenderer", () => {
 
       expect(() => renderAndGetSrcdoc(ad, undefined as unknown as string, PLACEMENT)).not.toThrow();
     });
+
+    it("falls back to the direct advertiser link when adConfigId is wrong-typed (e.g. a number, from a malformed ad-serve-api response — code review fix)", () => {
+      // isAdCandidate() in adDecisionClient.ts never validates adConfigId's type, only that
+      // creative/width/height are present — a schema-drifted response could hand this a number
+      // or object. Un-coerced, that would previously stringify into a broken /click URL (e.g.
+      // "adConfigId=%5Bobject+Object%5D") that ad-serve-api's own contract would 400 on, turning
+      // a working link into a broken one for the viewer — exactly what FR-003/FR-010 forbid.
+      const ad = {
+        ...makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }),
+        adConfigId: 12345 as unknown as string,
+      };
+
+      const markup = renderAndGetSrcdoc(ad, API_BASE_URL, PLACEMENT);
+
+      expect(markup).toContain('<a href="https://example.com/sale"');
+      expect(markup).not.toContain("/click?");
+    });
+
+    it("falls back to the direct advertiser link when adConfigId is an object (code review fix)", () => {
+      const ad = {
+        ...makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }),
+        adConfigId: {} as unknown as string,
+      };
+
+      const markup = renderAndGetSrcdoc(ad, API_BASE_URL, PLACEMENT);
+
+      expect(markup).toContain('<a href="https://example.com/sale"');
+      expect(markup).not.toContain("/click?");
+      expect(markup).not.toContain("object+Object");
+    });
   });
 
   describe("click tracking never affects clickability itself (feature 004, FR-004)", () => {

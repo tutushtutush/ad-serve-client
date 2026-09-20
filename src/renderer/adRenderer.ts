@@ -68,22 +68,31 @@ function toSafeHref(url: string): string | null {
 // destined to work ends up going first. platformId/adTypeId are always present on
 // PlacementIdentity (validated upstream by the Orchestrator), so they're not independently
 // checked here.
+//
+// adConfigId is coerced with asSafeString() before use, same as every other opaque,
+// upstream-sourced field in this file (FR-010) — isAdCandidate() in adDecisionClient.ts never
+// validates its type, only that creative/width/height are present, so a schema-drifted or
+// malformed response (adConfigId as a number/object) must degrade to the direct link, not get
+// silently stringified into a broken /click URL (e.g. "adConfigId=%5Bobject+Object%5D") that
+// ad-serve-api's own contract would then 400 on — a real regression for the viewer, caught in
+// review.
 function resolveClickHref(
   safeHref: string | null,
-  adConfigId: string | undefined,
+  adConfigId: unknown,
   placement: PlacementIdentity,
   apiBaseUrl: string,
 ): string | null {
   if (safeHref === null) {
     return null;
   }
-  if (!adConfigId || !apiBaseUrl) {
+  const safeAdConfigId = asSafeString(adConfigId);
+  if (!safeAdConfigId || !apiBaseUrl) {
     return safeHref;
   }
   const params = new URLSearchParams({
     platformId: placement.platformId,
     adTypeId: placement.adTypeId,
-    adConfigId,
+    adConfigId: safeAdConfigId,
   });
   return `${apiBaseUrl}/click?${params.toString()}`;
 }

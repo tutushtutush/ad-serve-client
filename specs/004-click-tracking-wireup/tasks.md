@@ -208,3 +208,23 @@ explicit test coverage proving it, not new behavior.
 2. User Story 1 → validate → this alone unblocks real click data (SC-001/SC-002).
 3. User Story 2 → validate → confirms SC-003 (never a broken link) explicitly, though the
    guarantee it proves was already load-bearing in Story 1's own design.
+
+## Code review fixes (round 2, post-PR#5)
+
+A review of PR #5 found 1 real, confirmed issue:
+
+1. **`resolveClickHref` didn't coerce `adConfigId` before use**, unlike every other opaque,
+   upstream-sourced field in this file (`asSafeString` applied throughout, per FR-010).
+   `isAdCandidate()` in `adDecisionClient.ts` never validates `adConfigId`'s type — only that
+   `creative`/`width`/`height` are present — so a schema-drifted or malformed ad-serve-api response
+   (`adConfigId` as a number or object) would pass the truthy check un-coerced and get silently
+   stringified into the URL (confirmed: produces exactly `adConfigId=%5Bobject+Object%5D`).
+   ad-serve-api's own `/click` contract 400s on a non-UUID `adConfigId`, so the viewer would land on
+   an error page instead of the advertiser's site — exactly the "tracking limitation breaks a
+   working link" outcome FR-003/US2 and this file's own FR-010 philosophy exist to prevent. Fixed
+   by applying the same `asSafeString()` coercion already used for every other field; two
+   regression tests (wrong-typed number, wrong-typed object) added, confirmed to fail against the
+   pre-fix code (producing the exact broken URL above) and pass against the fix.
+
+86/86 tests pass (2 new), lint/typecheck clean, re-verified live: a normal click still routes
+through `/click` correctly.
