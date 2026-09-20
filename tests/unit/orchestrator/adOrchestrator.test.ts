@@ -97,7 +97,7 @@ describe("createAdOrchestrator.run", () => {
     orchestrator.run(document);
     await new Promise(process.nextTick);
 
-    expect(renderer.renderAd).toHaveBeenCalledWith(el, ad);
+    expect(renderer.renderAd).toHaveBeenCalledWith(el, ad, { platformId: "p1", adTypeId: "banner" });
   });
 
   it("never calls the client for an invalid slot", async () => {
@@ -170,7 +170,10 @@ describe("createAdOrchestrator.run", () => {
     await new Promise(process.nextTick);
 
     expect(renderer.renderAd).toHaveBeenCalledTimes(1);
-    expect(renderer.renderAd).toHaveBeenCalledWith(fastSlot, ad);
+    expect(renderer.renderAd).toHaveBeenCalledWith(fastSlot, ad, {
+      platformId: "p2",
+      adTypeId: "leaderboard",
+    });
   });
 
   // --- 002-resilient-slot-discovery ---
@@ -385,6 +388,31 @@ describe("createAdOrchestrator.run", () => {
     const [secondRenderedElement, secondAd] = (renderer.renderAd as jest.Mock).mock.calls[1];
     expect(secondRenderedElement).toBe(replacement);
     expect(secondAd).toBe(ad); // same ad object — reused, not re-fetched
+  });
+
+  it("passes the same, correct placement identity to renderAd on both the initial render and a redisplay (feature 004, US1 Scenario 2)", async () => {
+    const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    document.body.innerHTML = "";
+    document.body.append(el);
+
+    const client: AdDecisionClientLike = {
+      requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
+    };
+    const renderer: AdRendererLike = { renderAd: jest.fn() };
+    const orchestrator = createAdOrchestrator({ client, renderer });
+
+    orchestrator.run(document);
+    await flushMicrotasks();
+    const [, , firstPlacement] = (renderer.renderAd as jest.Mock).mock.calls[0];
+
+    const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    el.replaceWith(replacement);
+    await flushMicrotasks();
+    const [, , secondPlacement] = (renderer.renderAd as jest.Mock).mock.calls[1];
+
+    const expected = { platformId: "p1", adTypeId: "banner" };
+    expect(firstPlacement).toEqual(expected);
+    expect(secondPlacement).toEqual(expected);
   });
 
   it("stops redisplaying after a bounded number of attempts, even under continuous removal (FR-010)", async () => {

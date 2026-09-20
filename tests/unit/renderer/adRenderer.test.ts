@@ -1,12 +1,23 @@
 import { createAdRenderer } from "../../../src/renderer/adRenderer";
 import { makeAdWithResolvedRender } from "../fixtures/adCreative";
-import type { AdCandidate } from "../../../src/types";
+import type { AdCandidate, PlacementIdentity } from "../../../src/types";
 
-function renderAndGetSrcdoc(ad: AdCandidate): string {
+const API_BASE_URL = "https://ads.example.com";
+const PLACEMENT: PlacementIdentity = { platformId: "plat-1", adTypeId: "banner" };
+
+// adConfigId is absent from makeAdWithResolvedRender()'s fixture by design (feature 004) — every
+// existing test below exercises the direct-link fallback (research.md) even with a real
+// apiBaseUrl/placement supplied, since resolveClickHref requires all three. Dedicated
+// click-tracking tests further down set ad.adConfigId explicitly.
+function renderAndGetSrcdoc(
+  ad: AdCandidate,
+  apiBaseUrl: string = API_BASE_URL,
+  placement: PlacementIdentity = PLACEMENT,
+): string {
   document.body.innerHTML = "";
   const slot = document.createElement("div");
   document.body.append(slot);
-  createAdRenderer(document).renderAd(slot, ad);
+  createAdRenderer(document, apiBaseUrl).renderAd(slot, ad, placement);
   return slot.querySelector("iframe")?.getAttribute("srcdoc") ?? "";
 }
 
@@ -16,7 +27,7 @@ describe("createAdRenderer", () => {
     const slot = document.createElement("div");
     document.body.append(slot);
 
-    createAdRenderer(document).renderAd(slot, makeAdWithResolvedRender());
+    createAdRenderer(document, API_BASE_URL).renderAd(slot, makeAdWithResolvedRender(), PLACEMENT);
 
     const iframe = slot.querySelector("iframe");
     expect(iframe).not.toBeNull();
@@ -30,7 +41,7 @@ describe("createAdRenderer", () => {
     const slot = document.createElement("div");
     document.body.append(slot);
 
-    createAdRenderer(document).renderAd(slot, makeAdWithResolvedRender());
+    createAdRenderer(document, API_BASE_URL).renderAd(slot, makeAdWithResolvedRender(), PLACEMENT);
 
     const iframe = slot.querySelector("iframe");
     expect(iframe?.getAttribute("width")).toBe("300");
@@ -243,6 +254,131 @@ describe("createAdRenderer", () => {
     });
   });
 
+  describe("click tracking (feature 004, US1)", () => {
+    it("routes the href through ad-serve-api's /click endpoint when adConfigId and apiBaseUrl are both available", () => {
+      const ad = { ...makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }), adConfigId: "ad-1" };
+
+      const markup = renderAndGetSrcdoc(ad, API_BASE_URL, PLACEMENT);
+
+      expect(markup).toContain(`<a href="${API_BASE_URL}/click?`);
+      expect(markup).not.toContain('<a href="https://example.com/sale"');
+    });
+
+    it("includes the correct platformId, adTypeId, and adConfigId as query parameters", () => {
+      const ad = { ...makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }), adConfigId: "ad-1" };
+
+      const markup = renderAndGetSrcdoc(ad, API_BASE_URL, { platformId: "plat-9", adTypeId: "leaderboard" });
+
+      const hrefMatch = markup.match(/<a href="([^"]+)"/);
+      expect(hrefMatch).not.toBeNull();
+      const href = hrefMatch![1].replace(/&amp;/g, "&");
+      const url = new URL(href);
+      expect(url.origin + url.pathname).toBe(`${API_BASE_URL}/click`);
+      expect(url.searchParams.get("platformId")).toBe("plat-9");
+      expect(url.searchParams.get("adTypeId")).toBe("leaderboard");
+      expect(url.searchParams.get("adConfigId")).toBe("ad-1");
+    });
+
+    it("still opens in a new tab with the same rel attributes as a direct link", () => {
+      const ad = { ...makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }), adConfigId: "ad-1" };
+
+      const markup = renderAndGetSrcdoc(ad, API_BASE_URL, PLACEMENT);
+
+      expect(markup).toContain('target="_blank" rel="noopener noreferrer"');
+    });
+  });
+
+  describe("click tracking fallback (feature 004, US2, FR-003)", () => {
+    it("falls back to the direct advertiser link when adConfigId is absent", () => {
+      // makeAdWithResolvedRender() never sets adConfigId (research.md) — this is the same
+      // fixture every pre-004 test above already uses, asserted explicitly here.
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }),
+        API_BASE_URL,
+        PLACEMENT,
+      );
+
+      expect(markup).toContain('<a href="https://example.com/sale"');
+      expect(markup).not.toContain("/click?");
+    });
+
+    it("falls back to the direct advertiser link when apiBaseUrl is blank", () => {
+      const ad = { ...makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }), adConfigId: "ad-1" };
+
+      const markup = renderAndGetSrcdoc(ad, "", PLACEMENT);
+
+      expect(markup).toContain('<a href="https://example.com/sale"');
+      expect(markup).not.toContain("/click?");
+    });
+
+    it("falls back to the direct advertiser link when both adConfigId and apiBaseUrl are unavailable", () => {
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }),
+        "",
+        PLACEMENT,
+      );
+
+      expect(markup).toContain('<a href="https://example.com/sale"');
+    });
+
+    it("does not throw when apiBaseUrl is an unexpected type (safe degradation, matches FR-010's existing pattern)", () => {
+      const ad = { ...makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }), adConfigId: "ad-1" };
+
+      expect(() => renderAndGetSrcdoc(ad, undefined as unknown as string, PLACEMENT)).not.toThrow();
+    });
+
+    it("falls back to the direct advertiser link when adConfigId is wrong-typed (e.g. a number, from a malformed ad-serve-api response — code review fix)", () => {
+      // isAdCandidate() in adDecisionClient.ts never validates adConfigId's type, only that
+      // creative/width/height are present — a schema-drifted response could hand this a number
+      // or object. Un-coerced, that would previously stringify into a broken /click URL (e.g.
+      // "adConfigId=%5Bobject+Object%5D") that ad-serve-api's own contract would 400 on, turning
+      // a working link into a broken one for the viewer — exactly what FR-003/FR-010 forbid.
+      const ad = {
+        ...makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }),
+        adConfigId: 12345 as unknown as string,
+      };
+
+      const markup = renderAndGetSrcdoc(ad, API_BASE_URL, PLACEMENT);
+
+      expect(markup).toContain('<a href="https://example.com/sale"');
+      expect(markup).not.toContain("/click?");
+    });
+
+    it("falls back to the direct advertiser link when adConfigId is an object (code review fix)", () => {
+      const ad = {
+        ...makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }),
+        adConfigId: {} as unknown as string,
+      };
+
+      const markup = renderAndGetSrcdoc(ad, API_BASE_URL, PLACEMENT);
+
+      expect(markup).toContain('<a href="https://example.com/sale"');
+      expect(markup).not.toContain("/click?");
+      expect(markup).not.toContain("object+Object");
+    });
+  });
+
+  describe("click tracking never affects clickability itself (feature 004, FR-004)", () => {
+    it("stays non-interactive when isLinked is false, even with adConfigId and apiBaseUrl available", () => {
+      const ad = { ...makeAdWithResolvedRender({ isLinked: false, linkUrl: "https://example.com/sale" }), adConfigId: "ad-1" };
+
+      const markup = renderAndGetSrcdoc(ad, API_BASE_URL, PLACEMENT);
+
+      expect(markup).not.toContain("<a ");
+      expect(markup).toContain('role="group"');
+    });
+
+    it("stays non-interactive when linkUrl is an unsafe scheme, even with adConfigId and apiBaseUrl available", () => {
+      const ad = { ...makeAdWithResolvedRender({ isLinked: true, linkUrl: "javascript:alert(1)" }), adConfigId: "ad-1" };
+
+      const markup = renderAndGetSrcdoc(ad, API_BASE_URL, PLACEMENT);
+
+      expect(markup).not.toContain("<a ");
+      expect(markup).not.toContain("javascript:alert");
+      expect(markup).not.toContain("/click?");
+    });
+  });
+
   describe("escaping (FR-009)", () => {
     it("escapes headline, CTA text, and aria-label", () => {
       const markup = renderAndGetSrcdoc(
@@ -314,7 +450,7 @@ describe("createAdRenderer", () => {
       document.body.innerHTML = "";
       const slot = document.createElement("div");
       document.body.append(slot);
-      createAdRenderer(document).renderAd(slot, makeAdWithResolvedRender());
+      createAdRenderer(document, API_BASE_URL).renderAd(slot, makeAdWithResolvedRender(), PLACEMENT);
 
       const sandbox = slot.querySelector("iframe")?.getAttribute("sandbox") ?? "";
       expect(sandbox).toContain("allow-popups-to-escape-sandbox");
