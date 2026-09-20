@@ -20,7 +20,7 @@ describe("createAdRenderer", () => {
 
     const iframe = slot.querySelector("iframe");
     expect(iframe).not.toBeNull();
-    expect(iframe?.getAttribute("sandbox")).toBe("allow-popups");
+    expect(iframe?.getAttribute("sandbox")).toBe("allow-popups allow-popups-to-escape-sandbox");
     expect(iframe?.getAttribute("sandbox")).not.toContain("allow-scripts");
     expect(iframe?.getAttribute("sandbox")).not.toContain("allow-same-origin");
   });
@@ -210,6 +210,67 @@ describe("createAdRenderer", () => {
       expect(markup).toContain("&lt;script&gt;");
       expect(markup).toContain("A &amp; B");
       expect(markup).toContain("&quot;quoted&quot; label");
+    });
+  });
+
+  describe("CSS/URL injection safety (code review fix)", () => {
+    it("does not let a quote in backgroundImageDataUrl break out of its CSS context", () => {
+      // The background image is rendered as an <img src>, not a CSS
+      // url(...) — so there is no CSS string for a quote to break out of at
+      // all. Assert the injected payload never appears as applied CSS.
+      const payload = "https://x/y' );position:fixed;top:0;left:0;background:#000;--z='";
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({ hasBackgroundImage: true, backgroundImageDataUrl: payload }),
+      );
+
+      expect(markup).not.toContain("background-image:url");
+      expect(markup).toContain("<img");
+      // The payload is safely confined to the <img>'s own src attribute
+      // (HTML-escaped, inert as CSS) — it must never appear as part of any
+      // style="..." attribute's actual applied CSS.
+      const styleAttrs = markup.match(/style="[^"]*"/g) ?? [];
+      for (const style of styleAttrs) {
+        expect(style).not.toContain("position:fixed");
+      }
+    });
+
+    it("does not let a semicolon in a resolved color/font value inject new CSS declarations", () => {
+      const payload = "white;position:absolute;inset:0;background:#000;z-index:99";
+      const markup = renderAndGetSrcdoc(makeAdWithResolvedRender({ headlineTextColor: payload }));
+
+      expect(markup).not.toContain(payload);
+      expect(markup).not.toContain("position:absolute;inset:0;background:#000");
+      // Falls back to the safe default instead of the unsafe value.
+      expect(markup).toContain("color:#ffffff");
+    });
+
+    it("does not let a CSS comment in a resolved value hide/reveal adjacent declarations", () => {
+      const markup = renderAndGetSrcdoc(makeAdWithResolvedRender({ ctaTextColor: "red/*" }));
+
+      expect(markup).not.toContain("/*");
+      expect(markup).toContain("color:#0369a1"); // falls back to default
+    });
+
+    it("still accepts legitimate font-family values containing commas and quotes", () => {
+      const markup = renderAndGetSrcdoc(
+        makeAdWithResolvedRender({ headlineFontFamily: "Georgia, 'Times New Roman', serif" }),
+      );
+
+      // Single quotes are HTML-entity-escaped (escapeForMarkup applies
+      // uniformly, even though they're harmless inside a double-quoted
+      // attribute) — the browser decodes them back to literal quotes before
+      // the CSS engine sees the value, so this remains valid, correct CSS.
+      expect(markup).toContain("font-family:Georgia, &#39;Times New Roman&#39;, serif");
+    });
+
+    it("opens the advertiser's landing page without inheriting the ad's own sandbox restrictions", () => {
+      document.body.innerHTML = "";
+      const slot = document.createElement("div");
+      document.body.append(slot);
+      createAdRenderer(document).renderAd(slot, makeAdWithResolvedRender());
+
+      const sandbox = slot.querySelector("iframe")?.getAttribute("sandbox") ?? "";
+      expect(sandbox).toContain("allow-popups-to-escape-sandbox");
     });
   });
 

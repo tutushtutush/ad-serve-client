@@ -251,3 +251,35 @@ shows a background on the button.
 This feature is essentially one change (T001 + T002) verified from five angles (T003–T007) —
 there is no meaningful incremental split beyond that; all five user stories become true the
 moment Phase 1 lands.
+
+## Post-Implementation Code Review
+
+A code review of this branch surfaced 3 findings after all tasks above were marked complete, all
+fixed:
+
+- **`src/renderer/adRenderer.ts`** (most severe): the iframe's `sandbox` was `allow-popups`
+  without `allow-popups-to-escape-sandbox` — per the WHATWG popup-inheritance rule, the
+  advertiser's own landing page opened via the ad's `target="_blank"` link inherited the ad's
+  sandbox restrictions (no scripts, unique origin), breaking the very destination this feature
+  made into a reliably-tested, central path (US5). Fixed by adding the missing sandbox token.
+- **`src/renderer/adRenderer.ts`**: `backgroundImageDataUrl` was embedded inside a quoted CSS
+  `url('...')` in a `style` attribute with only HTML-escaping applied — a `'` in the value
+  survives the browser's HTML-attribute-value entity decoding and comes back as a literal quote
+  by the time the CSS engine parses the style string, letting untrusted data (FR-010 explicitly
+  never guarantees `resolvedRender` is well-formed) break out and inject arbitrary CSS. Fixed by
+  rendering the background image as an `<img src>` element (matching the logo's already-safe
+  pattern) instead of a CSS `background-image`, removing the vulnerable context entirely rather
+  than trying to escape into it correctly.
+- **`src/renderer/adRenderer.ts`**: `headlineTextColor`/`headlineFontFamily`/`ctaTextColor`/
+  `ctaFontFamily`/`ctaBackgroundColor`/`logoBackgroundColor` were HTML-escaped but not validated
+  as safe CSS syntax before being interpolated unquoted into inline styles — a semicolon in the
+  value passed straight through and started new CSS declarations, no HTML-escaping bypass needed
+  at all. Fixed with a new `asSafeCssValue` helper that rejects values containing `;`, `{`, `}`,
+  or a CSS comment start (`/*`), falling back to the safe default otherwise — legitimate values
+  (hex colors, `rgb()`, font names with commas/quotes) are unaffected.
+
+5 new regression tests added covering all three fixes plus confirming legitimate font-family
+syntax (commas, quotes) still passes through correctly. Re-verified after fixes: lint/typecheck/
+69-of-69 unit tests clean, and the real live ad (T003's) still renders correctly end-to-end —
+logo, placeholder, clickable link, and now a properly un-sandboxed landing page — with no
+injected CSS reaching an actual `style` attribute.

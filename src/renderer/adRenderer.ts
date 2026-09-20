@@ -17,6 +17,20 @@ function asSafePositiveNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
+// A resolved color/font value is placed directly into a CSS property value
+// with no surrounding quotes — HTML-escaping only guards the HTML
+// attribute-value context, it does nothing to stop the *decoded* value from
+// injecting new CSS once the browser's HTML parser hands the style
+// attribute's content to the CSS engine. Reject anything that could break
+// out of a single CSS value: a semicolon starts a new declaration, braces
+// could break out of the rule entirely, and a CSS comment could hide/reveal
+// characters unpredictably. Falls back to the given safe default otherwise.
+function asSafeCssValue(value: unknown, fallback: string): string {
+  const str = asSafeString(value);
+  const isSafe = str.length > 0 && !/[;{}]/.test(str) && !str.includes("/*");
+  return escapeForMarkup(isSafe ? str : fallback);
+}
+
 // Only allow http(s) links — linkUrl is external, untrusted data, and
 // rendering it as an href must never permit a javascript: (or other) scheme
 // escape, regardless of what isLinked says (FR-008). Returns null (not a
@@ -48,20 +62,20 @@ function buildCreativeMarkup(ad: AdCandidate): string {
   // Defaults mirror adconfig's own preview defaults (white headline text,
   // sky-blue CTA text) so a degraded/unset case still looks intentional
   // rather than arbitrary.
-  const headlineColor = escapeForMarkup(asSafeString(r.headlineTextColor) || "#ffffff");
-  const headlineFont = escapeForMarkup(asSafeString(r.headlineFontFamily) || "inherit");
-  const ctaColor = escapeForMarkup(asSafeString(r.ctaTextColor) || "#0369a1");
-  const ctaFont = escapeForMarkup(asSafeString(r.ctaFontFamily) || "inherit");
+  const headlineColor = asSafeCssValue(r.headlineTextColor, "#ffffff");
+  const headlineFont = asSafeCssValue(r.headlineFontFamily, "inherit");
+  const ctaColor = asSafeCssValue(r.ctaTextColor, "#0369a1");
+  const ctaFont = asSafeCssValue(r.ctaFontFamily, "inherit");
   // Unlike the logo, the CTA always has a background — no enable/disable
   // flag (FR-004, US3).
-  const ctaBackground = escapeForMarkup(asSafeString(r.ctaBackgroundColor) || "#ffffff");
+  const ctaBackground = asSafeCssValue(r.ctaBackgroundColor, "#ffffff");
 
   const hasLogoImage =
     asSafeBoolean(r.hasLogoImage, false) &&
     typeof r.logoImageDataUrl === "string" &&
     r.logoImageDataUrl.length > 0;
   const logoBackgroundEnabled = asSafeBoolean(r.logoBackgroundEnabled, true);
-  const logoBackgroundColor = escapeForMarkup(asSafeString(r.logoBackgroundColor) || "#ffffff");
+  const logoBackgroundColor = asSafeCssValue(r.logoBackgroundColor, "#ffffff");
   const logo = hasLogoImage
     ? `<div style="display:inline-flex;align-items:center;overflow:hidden;border-radius:4px;padding:2px 5px;${
         logoBackgroundEnabled ? `background-color:${logoBackgroundColor};` : ""
@@ -78,11 +92,15 @@ function buildCreativeMarkup(ad: AdCandidate): string {
   // uses (min(width, height) / 3) so the degraded case still looks
   // consistent with the normal one (research.md).
   const iconSize = asSafePositiveNumber(r.iconSize) ?? Math.min(ad.width, ad.height) / 3;
-  const backgroundStyle = hasBackgroundImage
-    ? `background-image:url('${escapeForMarkup(asSafeString(r.backgroundImageDataUrl))}');background-size:cover;background-position:center;`
-    : "background:linear-gradient(135deg,#7dd3fc,#0284c7);";
-  const placeholder = hasBackgroundImage
-    ? ""
+  // Rendered as an <img> (like the logo already is), not a CSS
+  // `background-image: url(...)`: embedding untrusted data inside a quoted
+  // CSS string via string concatenation is unsafe — HTML-escaping a `'`
+  // survives the browser's HTML-attribute-value entity decoding and comes
+  // back as a literal quote by the time the CSS engine parses the style
+  // attribute's content, letting it break out of the url() token. An <img
+  // src> has no such second parsing pass to exploit.
+  const backgroundLayer = hasBackgroundImage
+    ? `<img src="${escapeForMarkup(asSafeString(r.backgroundImageDataUrl))}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" />`
     : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">${buildPlaceholderIcon(iconSize)}</div>`;
 
   const isLinked = asSafeBoolean(r.isLinked, false);
@@ -100,8 +118,8 @@ function buildCreativeMarkup(ad: AdCandidate): string {
   // interactive content inside this wrapper's own <a> would be invalid
   // HTML5 and leaves keyboard/screen-reader activation undefined).
   return `<!DOCTYPE html><html><body style="margin:0;">
-    <${wrapperTag} ${wrapperAttrs}${ariaAttr} style="position:relative;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;width:100%;height:100%;padding:8px;overflow:hidden;text-decoration:none;${backgroundStyle}">
-      ${placeholder}
+    <${wrapperTag} ${wrapperAttrs}${ariaAttr} style="position:relative;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;width:100%;height:100%;padding:8px;overflow:hidden;text-decoration:none;background:linear-gradient(135deg,#7dd3fc,#0284c7);">
+      ${backgroundLayer}
       <div style="position:relative;display:flex;align-items:flex-start;">${logo}</div>
       <div style="position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;">
         <span style="font-size:14px;font-weight:700;color:${headlineColor};font-family:${headlineFont};">${headline}</span>
@@ -116,7 +134,12 @@ export function createAdRenderer(documentImpl: Document) {
     const iframe = documentImpl.createElement("iframe");
     // Narrowest sandbox that satisfies a static text/image/link creative
     // (research.md): no allow-scripts, no allow-same-origin.
-    iframe.setAttribute("sandbox", "allow-popups");
+    // allow-popups-to-escape-sandbox is required alongside allow-popups: per
+    // the WHATWG popup-inheritance rule, a popup opened from a sandboxed
+    // frame otherwise inherits that sandbox's restrictions itself, which
+    // would break the advertiser's own landing page (no scripts, unique
+    // origin) the moment a visitor actually clicks through.
+    iframe.setAttribute("sandbox", "allow-popups allow-popups-to-escape-sandbox");
     iframe.setAttribute("width", String(ad.width));
     iframe.setAttribute("height", String(ad.height));
     iframe.setAttribute("frameborder", "0");
