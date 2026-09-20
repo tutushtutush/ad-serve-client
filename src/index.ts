@@ -35,7 +35,7 @@ function main(): void {
       window.adServe = window.adServe || { q: [] };
 
       const client = createAdDecisionClient(window.fetch.bind(window), baseUrl);
-      const renderer = createAdRenderer(document);
+      const renderer = createAdRenderer(document, baseUrl);
       const orchestrator = createAdOrchestrator({ client, renderer });
 
       orchestrator.run(document);

@@ -1,5 +1,5 @@
 import { escapeForMarkup } from "../utils/escapeForMarkup";
-import type { AdCandidate, ResolvedAdCreativeRender } from "../types";
+import type { AdCandidate, PlacementIdentity, ResolvedAdCreativeRender } from "../types";
 
 // resolvedRender's fields are opaque and optional (types.ts) — a missing
 // field, a missing resolvedRender entirely, or a wrong-typed field must
@@ -60,6 +60,34 @@ function toSafeHref(url: string): string | null {
   return /^https?:\/\//i.test(url) ? url : null;
 }
 
+// Routes an already-safe click target through ad-serve-api's click-tracking endpoint (feature
+// 004) instead of linking straight to the advertiser — but only when there's enough information
+// to build that URL. Any one of adConfigId/apiBaseUrl missing falls back to safeHref directly
+// (FR-003, research.md): a tracking limitation must never turn a working link into a broken one,
+// and must never affect *whether* the ad is clickable (FR-004) — only where a click already
+// destined to work ends up going first. platformId/adTypeId are always present on
+// PlacementIdentity (validated upstream by the Orchestrator), so they're not independently
+// checked here.
+function resolveClickHref(
+  safeHref: string | null,
+  adConfigId: string | undefined,
+  placement: PlacementIdentity,
+  apiBaseUrl: string,
+): string | null {
+  if (safeHref === null) {
+    return null;
+  }
+  if (!adConfigId || !apiBaseUrl) {
+    return safeHref;
+  }
+  const params = new URLSearchParams({
+    platformId: placement.platformId,
+    adTypeId: placement.adTypeId,
+    adConfigId,
+  });
+  return `${apiBaseUrl}/click?${params.toString()}`;
+}
+
 // A small, generic "image" glyph for the background placeholder — hand-drawn
 // rather than pulled from an icon library, which wouldn't be portable into a
 // plain HTML string anyway (research.md).
@@ -71,7 +99,7 @@ function buildPlaceholderIcon(size: number): string {
   </svg>`;
 }
 
-function buildCreativeMarkup(ad: AdCandidate): string {
+function buildCreativeMarkup(ad: AdCandidate, apiBaseUrl: string, placement: PlacementIdentity): string {
   const r: ResolvedAdCreativeRender =
     typeof ad.resolvedRender === "object" && ad.resolvedRender !== null ? ad.resolvedRender : {};
 
@@ -119,6 +147,11 @@ function buildCreativeMarkup(ad: AdCandidate): string {
 
   const isLinked = asSafeBoolean(r.isLinked, false);
   const safeHref = isLinked ? toSafeHref(asSafeString(r.linkUrl)) : null;
+  // Whether the ad is clickable at all is still decided by safeHref alone (FR-004, unchanged) —
+  // resolveClickHref only ever changes *where* an already-clickable ad points, routing through
+  // ad-serve-api's click endpoint when possible and falling back to safeHref itself otherwise
+  // (feature 004, FR-003).
+  const clickHref = resolveClickHref(safeHref, ad.adConfigId, placement, apiBaseUrl);
   // tag and attrs are derived together, not via separate parallel ternaries
   // on the same condition, so they can never diverge into a mismatched
   // open/close tag pair (code review round 2). The non-interactive case uses
@@ -127,8 +160,8 @@ function buildCreativeMarkup(ad: AdCandidate): string {
   // them out of the accessibility tree as if the whole thing were one opaque
   // image, silently hiding that text from screen readers (code review
   // round 2 — a real regression, not merely a style preference).
-  const wrapper = safeHref
-    ? { tag: "a", attrs: `href="${escapeForMarkup(safeHref)}" target="_blank" rel="noopener noreferrer"` }
+  const wrapper = clickHref
+    ? { tag: "a", attrs: `href="${escapeForMarkup(clickHref)}" target="_blank" rel="noopener noreferrer"` }
     : { tag: "div", attrs: `role="group"` };
   const ariaAttr = ariaLabel ? ` aria-label="${ariaLabel}"` : "";
 
@@ -157,8 +190,8 @@ function buildCreativeMarkup(ad: AdCandidate): string {
   </body></html>`;
 }
 
-export function createAdRenderer(documentImpl: Document) {
-  function renderAd(slotElement: Element, ad: AdCandidate): void {
+export function createAdRenderer(documentImpl: Document, apiBaseUrl: string) {
+  function renderAd(slotElement: Element, ad: AdCandidate, placement: PlacementIdentity): void {
     const iframe = documentImpl.createElement("iframe");
     // Narrowest sandbox that satisfies a static text/image/link creative
     // (research.md): no allow-scripts, no allow-same-origin.
@@ -172,7 +205,7 @@ export function createAdRenderer(documentImpl: Document) {
     iframe.setAttribute("height", String(ad.height));
     iframe.setAttribute("frameborder", "0");
     iframe.setAttribute("scrolling", "no");
-    iframe.setAttribute("srcdoc", buildCreativeMarkup(ad));
+    iframe.setAttribute("srcdoc", buildCreativeMarkup(ad, apiBaseUrl, placement));
     slotElement.appendChild(iframe);
   }
 

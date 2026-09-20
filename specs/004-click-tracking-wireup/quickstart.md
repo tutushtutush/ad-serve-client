@@ -43,14 +43,23 @@ psql "$EVENTS_DATABASE_URL" -c \
 
 **Expected**: one row matching the slot's placement and the ad actually rendered.
 
-## Scenario 4: Missing `apiBaseUrl` falls back to a direct advertiser link (US2, FR-003)
+## Scenario 4: Missing `apiBaseUrl` — verified at the unit level, not reachable live (US2, FR-003)
 
 Load a host page whose loader snippet's `<script>` tag has **no** `data-api-base-url` attribute
-(or an empty one). Inspect the rendered iframe's `srcdoc` the same way as Scenario 1.
+(or an empty one).
 
-**Expected**: the `<a href="...">` points directly at the advertiser's `linkUrl`, exactly as this
-SDK behaved before this feature — no broken or malformed URL, no thrown error, ad still renders
-and remains clickable.
+**Actual finding**: this does *not* exercise the click-fallback path live. `apiBaseUrl` also gates
+the `/ads` decision request itself — `getApiBaseUrl()`'s `""` fallback becomes a relative URL,
+resolving against the host page's own origin rather than ad-serve-api, so the request never
+reaches ad-serve-api at all and no ad is ever fetched or rendered. What *is* confirmed live: the
+host page does not crash and the slot stays silently empty (Constitution Principle V holds) — but
+there's no rendered ad to inspect an `href` on. The actual "click falls back to `safeHref` when
+`apiBaseUrl` is unavailable" behavior is verified at the unit level instead
+(`tests/unit/renderer/adRenderer.test.ts`'s "click tracking fallback" describe block), where
+`buildCreativeMarkup` is exercised directly, independent of the fetch layer that gates it live.
+
+**Expected** (unit-level): with `apiBaseUrl` blank/absent but `adConfigId` present, `resolveClickHref`
+returns the direct `safeHref`, not a `/click` URL.
 
 ## Scenario 5: An ad with no destination remains non-interactive, unaffected by this feature (US2, FR-004)
 

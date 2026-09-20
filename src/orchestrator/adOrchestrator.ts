@@ -1,11 +1,17 @@
-import type { AdCandidate, AdDecisionRequest, AdDecisionResult, AdSlotConfig } from "../types";
+import type {
+  AdCandidate,
+  AdDecisionRequest,
+  AdDecisionResult,
+  AdSlotConfig,
+  PlacementIdentity,
+} from "../types";
 
 export interface AdDecisionClientLike {
   requestAd(request: AdDecisionRequest): Promise<AdDecisionResult>;
 }
 
 export interface AdRendererLike {
-  renderAd(slotElement: Element, ad: AdCandidate): void;
+  renderAd(slotElement: Element, ad: AdCandidate, placement: PlacementIdentity): void;
 }
 
 export interface AdOrchestratorDeps {
@@ -140,7 +146,10 @@ export function createAdOrchestrator({ client, renderer }: AdOrchestratorDeps) {
       }
 
       slot.ad = result.ad;
-      renderer.renderAd(slot.currentElement, result.ad);
+      renderer.renderAd(slot.currentElement, result.ad, {
+        platformId: slot.config.platformId,
+        adTypeId: slot.config.adTypeId,
+      });
       slot.renderedElement = slot.currentElement;
       // Deliberately not resolved yet: the render may itself be undone
       // shortly afterward by the host page's own redraw (e.g. a hydration
@@ -230,7 +239,10 @@ export function createAdOrchestrator({ client, renderer }: AdOrchestratorDeps) {
 
           // Redisplay the same, already-fetched ad — never a second request
           // (research.md).
-          renderer.renderAd(current, slot.ad as AdCandidate);
+          renderer.renderAd(current, slot.ad as AdCandidate, {
+            platformId: slot.config.platformId,
+            adTypeId: slot.config.adTypeId,
+          });
           slot.renderedElement = current;
           slot.redisplaysRemaining -= 1;
           slot.quietBatchesRemaining = INITIAL_QUIET_BATCHES_REMAINING;
