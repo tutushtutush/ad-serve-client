@@ -14,9 +14,23 @@ export interface AdRendererLike {
   renderAd(slotElement: Element, ad: AdCandidate, placement: PlacementIdentity): void;
 }
 
+export interface ViewabilityDetectorLike {
+  watch(element: Element, onViewable: () => void): () => void;
+}
+
+export interface ViewableImpressionClientLike {
+  reportViewableImpression(report: { platformId: string; adTypeId: string; adConfigId: string }): void;
+}
+
 export interface AdOrchestratorDeps {
   client: AdDecisionClientLike;
   renderer: AdRendererLike;
+  // Optional (data-model.md, feature 005): an orchestrator built without either simply never
+  // starts a viewability watch, the same degrade-safely posture as a missing adConfigId — so
+  // every pre-existing test of unrelated behavior doesn't also need viewability fakes. Real usage
+  // (index.ts) always supplies both.
+  viewabilityDetector?: ViewabilityDetectorLike;
+  trackingClient?: ViewableImpressionClientLike;
 }
 
 const SLOT_SELECTOR = "[data-ad-serve-slot]";
@@ -80,6 +94,11 @@ interface TrackedSlot {
   renderedElement: Element | null;
   redisplaysRemaining: number;
   quietBatchesRemaining: number;
+  // The active viewability watch's stop function, or null when none is pending (never started,
+  // already fired, or already stopped). Stopped and reset to null on redisplay (a fresh watch
+  // starts for the new element, FR-003) and whenever the slot is marked resolved (FR-007) —
+  // see resolveSlot/startViewabilityWatch below (feature 005).
+  stopViewabilityWatch: (() => void) | null;
 }
 
 interface GroupedSlotElement {
@@ -127,12 +146,55 @@ function mapSlotsByGroupPosition(root: ParentNode): Map<string, Element> {
   return byPosition;
 }
 
-export function createAdOrchestrator({ client, renderer }: AdOrchestratorDeps) {
+export function createAdOrchestrator({ client, renderer, viewabilityDetector, trackingClient }: AdOrchestratorDeps) {
+  // Marks a slot resolved and stops any viewability watch still pending for it — a slot that
+  // will never render/redisplay again must not leave a live IntersectionObserver behind (FR-007).
+  // Every `slot.resolved = true` assignment goes through here instead of being set directly, so
+  // this cleanup can never be forgotten at a new call site.
+  function resolveSlot(slot: TrackedSlot): void {
+    slot.resolved = true;
+    slot.stopViewabilityWatch?.();
+    slot.stopViewabilityWatch = null;
+  }
+
+  // Starts a fresh viewability watch for a just-rendered instance of `slot`, reporting via
+  // `trackingClient` once the IAB threshold (research.md) is satisfied. No-ops when either
+  // dependency wasn't supplied (data-model.md) or `adConfigId` is unavailable (FR-004) — there's
+  // nothing to report in either case, so no observer is started at all.
+  function startViewabilityWatch(slot: TrackedSlot, element: Element): void {
+    slot.stopViewabilityWatch?.();
+    slot.stopViewabilityWatch = null;
+
+    const adConfigId = slot.ad?.adConfigId;
+    if (!viewabilityDetector || !trackingClient || !adConfigId) {
+      return;
+    }
+
+    slot.stopViewabilityWatch = viewabilityDetector.watch(element, () => {
+      slot.stopViewabilityWatch = null;
+      // Wrapped here too, not just inside viewabilityDetector.ts's own callback — this closure is
+      // itself an entry point invoked on a schedule this SDK doesn't control, and defense-in-depth
+      // (this codebase's established pattern: never trust a single layer's contract alone) means
+      // a throw from trackingClient must not propagate regardless of whether the injected
+      // ViewabilityDetectorLike implementation also happens to guard its own callback invocation
+      // (Constitution Principle V, FR-006).
+      try {
+        trackingClient.reportViewableImpression({
+          platformId: slot.config.platformId,
+          adTypeId: slot.config.adTypeId,
+          adConfigId,
+        });
+      } catch {
+        // See comment above.
+      }
+    });
+  }
+
   async function runSlot(slot: TrackedSlot): Promise<void> {
     try {
       const result = await client.requestAd(slot.config);
       if (result.status !== "filled") {
-        slot.resolved = true;
+        resolveSlot(slot);
         return;
       }
 
@@ -141,7 +203,7 @@ export function createAdOrchestrator({ client, renderer }: AdOrchestratorDeps) {
       // flight (FR-003). isConnected is a final safety net against a
       // last-instant removal the observer hasn't reacted to yet.
       if (!slot.currentElement || !slot.currentElement.isConnected) {
-        slot.resolved = true;
+        resolveSlot(slot);
         return;
       }
 
@@ -151,6 +213,7 @@ export function createAdOrchestrator({ client, renderer }: AdOrchestratorDeps) {
         adTypeId: slot.config.adTypeId,
       });
       slot.renderedElement = slot.currentElement;
+      startViewabilityWatch(slot, slot.currentElement);
       // Deliberately not resolved yet: the render may itself be undone
       // shortly afterward by the host page's own redraw (e.g. a hydration
       // mismatch discarding the subtree it landed in) — the mutation
@@ -159,7 +222,7 @@ export function createAdOrchestrator({ client, renderer }: AdOrchestratorDeps) {
     } catch {
       // A slot that fails for any unexpected reason simply stays empty —
       // never let it escape to the host page (Constitution Principle V).
-      slot.resolved = true;
+      resolveSlot(slot);
     }
   }
 
@@ -177,6 +240,7 @@ export function createAdOrchestrator({ client, renderer }: AdOrchestratorDeps) {
         renderedElement: null,
         redisplaysRemaining: INITIAL_REDISPLAYS_REMAINING,
         quietBatchesRemaining: INITIAL_QUIET_BATCHES_REMAINING,
+        stopViewabilityWatch: null,
       });
     }
 
@@ -209,7 +273,7 @@ export function createAdOrchestrator({ client, renderer }: AdOrchestratorDeps) {
           if (slot.renderedElement.isConnected) {
             slot.quietBatchesRemaining -= 1;
             if (slot.quietBatchesRemaining <= 0) {
-              slot.resolved = true;
+              resolveSlot(slot);
             }
             continue;
           }
@@ -225,7 +289,7 @@ export function createAdOrchestrator({ client, renderer }: AdOrchestratorDeps) {
             // failure this feature exists to fix).
             slot.quietBatchesRemaining -= 1;
             if (slot.quietBatchesRemaining <= 0) {
-              slot.resolved = true;
+              resolveSlot(slot);
             }
             continue;
           }
@@ -233,7 +297,7 @@ export function createAdOrchestrator({ client, renderer }: AdOrchestratorDeps) {
             // A current element exists, but the redisplay budget is
             // exhausted — leave the slot in whatever state it last reached
             // (FR-010).
-            slot.resolved = true;
+            resolveSlot(slot);
             continue;
           }
 
@@ -246,6 +310,10 @@ export function createAdOrchestrator({ client, renderer }: AdOrchestratorDeps) {
           slot.renderedElement = current;
           slot.redisplaysRemaining -= 1;
           slot.quietBatchesRemaining = INITIAL_QUIET_BATCHES_REMAINING;
+          // A redisplayed instance is independently eligible to be reported again — a fresh
+          // watch, not a continuation of whatever the pre-redisplay one was doing (FR-003,
+          // spec Acceptance Scenario 4).
+          startViewabilityWatch(slot, current);
         }
       } catch {
         // A defect here must never escape into the host page's own

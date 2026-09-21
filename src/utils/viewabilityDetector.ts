@@ -1,0 +1,83 @@
+// IAB viewability standard: at least 50% of the element's area visible within the viewport,
+// continuously, for at least one second (research.md).
+const VIEWABILITY_THRESHOLD = 0.5;
+const VIEWABILITY_DURATION_MS = 1000;
+
+export interface ViewabilityDetectorLike {
+  // Starts watching `element`. Calls `onViewable` at most once, the first time the IAB
+  // viewability condition is satisfied. Returns a `stop()` function that cancels the watch —
+  // safe to call at any time, including after `onViewable` has already fired (a no-op then).
+  watch(element: Element, onViewable: () => void): () => void;
+}
+
+/**
+ * `IntersectionObserverImpl` is injected rather than read from the global, so callers (and
+ * tests) control what "supported" means: `undefined` degrades every `watch()` call to a no-op
+ * that never calls `onViewable`, matching FR-005's "unsupported browser" requirement without
+ * this module ever touching a global itself.
+ */
+export function createViewabilityDetector(
+  IntersectionObserverImpl: typeof IntersectionObserver | undefined,
+): ViewabilityDetectorLike {
+  function watch(element: Element, onViewable: () => void): () => void {
+    if (!IntersectionObserverImpl) {
+      return () => {};
+    }
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let stopped = false;
+
+    function clearPendingTimer(): void {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    }
+
+    function stop(): void {
+      if (stopped) {
+        return;
+      }
+      stopped = true;
+      clearPendingTimer();
+      observer.disconnect();
+    }
+
+    // Wrapped in try/catch: this callback is invoked by the browser on its own schedule, not by
+    // code this SDK controls the timing of — an uncaught throw here must never reach the host
+    // page's own execution (Constitution Principle V).
+    const observer = new IntersectionObserverImpl(
+      (entries) => {
+        try {
+          const entry = entries[entries.length - 1];
+          if (entry.isIntersecting && entry.intersectionRatio >= VIEWABILITY_THRESHOLD) {
+            if (timer === null) {
+              timer = setTimeout(() => {
+                try {
+                  stop();
+                  onViewable();
+                } catch {
+                  // See comment above the observer construction — this timer callback runs on
+                  // its own schedule too, so it needs the same guard as the observer callback.
+                }
+              }, VIEWABILITY_DURATION_MS);
+            }
+          } else {
+            // Dropped back below threshold before the timer fired: this view doesn't count, but
+            // doesn't block a later qualifying one either — just clear the pending timer and keep
+            // watching (research.md, spec Acceptance Scenario 3).
+            clearPendingTimer();
+          }
+        } catch {
+          // See comment above the observer construction.
+        }
+      },
+      { threshold: VIEWABILITY_THRESHOLD },
+    );
+
+    observer.observe(element);
+    return stop;
+  }
+
+  return { watch };
+}
