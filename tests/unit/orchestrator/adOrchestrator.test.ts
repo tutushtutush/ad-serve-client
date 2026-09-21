@@ -4,6 +4,8 @@ import {
   parseSlotConfig,
   type AdDecisionClientLike,
   type AdRendererLike,
+  type ViewabilityDetectorLike,
+  type ViewableImpressionClientLike,
 } from "../../../src/orchestrator/adOrchestrator";
 import type { AdDecisionResult } from "../../../src/types";
 import { makeAd } from "../fixtures/adCreative";
@@ -516,5 +518,325 @@ describe("createAdOrchestrator.run", () => {
     expect(renderer.renderAd).toHaveBeenCalledTimes(2);
     const [renderedElement] = (renderer.renderAd as jest.Mock).mock.calls[1];
     expect(renderedElement).toBe(replacement);
+  });
+
+  // --- 005-wire-viewable-impression ---
+
+  const adWithConfig = { ...makeAd(), adConfigId: "config-1" };
+
+  function createFakeViewabilityDetector() {
+    const watchCalls: Array<{ element: Element; onViewable: () => void; stop: jest.Mock }> = [];
+    const detector: ViewabilityDetectorLike = {
+      watch: jest.fn((element: Element, onViewable: () => void) => {
+        const stop = jest.fn();
+        watchCalls.push({ element, onViewable, stop });
+        return stop;
+      }),
+    };
+    return { detector, watchCalls };
+  }
+
+  function createFakeTrackingClient() {
+    const trackingClient: ViewableImpressionClientLike = { reportViewableImpression: jest.fn() };
+    return trackingClient as ViewableImpressionClientLike & { reportViewableImpression: jest.Mock };
+  }
+
+  describe("viewability tracking", () => {
+    it("starts a viewability watch on the rendered element after a successful render, when adConfigId is available", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: adWithConfig })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const { detector, watchCalls } = createFakeViewabilityDetector();
+      const trackingClient = createFakeTrackingClient();
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector: detector,
+        trackingClient,
+      });
+
+      orchestrator.run(document);
+      await flushMicrotasks();
+
+      expect(watchCalls).toHaveLength(1);
+      expect(watchCalls[0].element).toBe(el);
+    });
+
+    it("reports via trackingClient with the correct identifiers once the watch fires", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: adWithConfig })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const { detector, watchCalls } = createFakeViewabilityDetector();
+      const trackingClient = createFakeTrackingClient();
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector: detector,
+        trackingClient,
+      });
+
+      orchestrator.run(document);
+      await flushMicrotasks();
+
+      watchCalls[0].onViewable();
+
+      expect(trackingClient.reportViewableImpression).toHaveBeenCalledWith({
+        platformId: "p1",
+        adTypeId: "banner",
+        adConfigId: "config-1",
+      });
+    });
+
+    it("never starts a watch when adConfigId is unavailable (FR-004)", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })), // no adConfigId
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const { detector, watchCalls } = createFakeViewabilityDetector();
+      const trackingClient = createFakeTrackingClient();
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector: detector,
+        trackingClient,
+      });
+
+      orchestrator.run(document);
+      await flushMicrotasks();
+
+      expect(renderer.renderAd).toHaveBeenCalledTimes(1); // ad still renders
+      expect(watchCalls).toHaveLength(0);
+    });
+
+    it("never reports a non-string adConfigId as-is, degrading like a missing one (caught in code review)", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      // A schema-drifted response: adConfigId present but the wrong type (isAdCandidate never
+      // validates its type, only that creative/width/height are present).
+      const malformedAd = { ...makeAd(), adConfigId: { foo: 1 } as unknown as string };
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: malformedAd })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const { detector, watchCalls } = createFakeViewabilityDetector();
+      const trackingClient = createFakeTrackingClient();
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector: detector,
+        trackingClient,
+      });
+
+      orchestrator.run(document);
+      await flushMicrotasks();
+
+      expect(renderer.renderAd).toHaveBeenCalledTimes(1); // ad still renders
+      expect(watchCalls).toHaveLength(0); // no watch started for an un-reportable ad instance
+    });
+
+    it("never starts a watch, and never throws, when viewabilityDetector/trackingClient aren't provided", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: adWithConfig })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const orchestrator = createAdOrchestrator({ client, renderer }); // no viewability deps
+
+      orchestrator.run(document);
+      await flushMicrotasks();
+
+      expect(renderer.renderAd).toHaveBeenCalledTimes(1);
+    });
+
+    it("a redisplay stops the pre-redisplay watch and starts an independent new one (FR-003, spec Acceptance Scenario 4)", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: adWithConfig })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const { detector, watchCalls } = createFakeViewabilityDetector();
+      const trackingClient = createFakeTrackingClient();
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector: detector,
+        trackingClient,
+      });
+
+      orchestrator.run(document);
+      await flushMicrotasks(); // initial render
+      expect(watchCalls).toHaveLength(1);
+      const firstWatch = watchCalls[0];
+
+      const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      el.replaceWith(replacement);
+      await flushMicrotasks(); // redisplay
+
+      expect(firstWatch.stop).toHaveBeenCalledTimes(1);
+      expect(watchCalls).toHaveLength(2);
+      expect(watchCalls[1].element).toBe(replacement);
+
+      // Both watches are independently reportable.
+      watchCalls[1].onViewable();
+      expect(trackingClient.reportViewableImpression).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps a still-pending watch alive when a slot settles via quiet mutation batches while its element stays connected (caught in code review)", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: adWithConfig })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const { detector, watchCalls } = createFakeViewabilityDetector();
+      const trackingClient = createFakeTrackingClient();
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector: detector,
+        trackingClient,
+      });
+
+      orchestrator.run(document);
+      await flushMicrotasks(); // initial render
+      expect(watchCalls).toHaveLength(1);
+
+      // Enough quiet mutation batches for redisplay-tracking to settle (mirrors the FR-008 settle
+      // test) — but the rendered element itself is never removed. The ad may still be below the
+      // fold, not yet scrolled to: its viewability watch must not be cut short just because
+      // unrelated page activity produced enough mutation batches (SC-002).
+      for (let i = 0; i < 15; i++) {
+        document.body.append(document.createElement("span"));
+        await flushMicrotasks();
+      }
+
+      expect(watchCalls[0].stop).not.toHaveBeenCalled();
+
+      // And it still works: scrolling it into view later (simulated here as the watch firing)
+      // still produces a report.
+      watchCalls[0].onViewable();
+      expect(trackingClient.reportViewableImpression).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops a still-pending watch once a slot's redisplay budget is exhausted after genuine removals (FR-007)", async () => {
+      let current = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(current);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: adWithConfig })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const { detector, watchCalls } = createFakeViewabilityDetector();
+      const trackingClient = createFakeTrackingClient();
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector: detector,
+        trackingClient,
+      });
+
+      orchestrator.run(document);
+      await flushMicrotasks(); // initial render
+      expect(watchCalls).toHaveLength(1);
+
+      // Keep genuinely replacing the rendered element well beyond the redisplay budget
+      // (mirrors the FR-010 "bounded redisplays" test) — each replacement starts its own fresh
+      // watch and stops the previous one; the very last one, once the budget is exhausted, is
+      // never replaced by a new watch and must itself be stopped.
+      for (let i = 0; i < 10; i++) {
+        const next = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+        current.replaceWith(next);
+        current = next;
+        await flushMicrotasks();
+      }
+
+      const lastWatch = watchCalls[watchCalls.length - 1];
+      expect(lastWatch.stop).toHaveBeenCalledTimes(1);
+    });
+
+    it("a throwing trackingClient.reportViewableImpression does not propagate", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: adWithConfig })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const { detector, watchCalls } = createFakeViewabilityDetector();
+      const trackingClient: ViewableImpressionClientLike = {
+        reportViewableImpression: jest.fn(() => {
+          throw new Error("boom");
+        }),
+      };
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector: detector,
+        trackingClient,
+      });
+
+      orchestrator.run(document);
+      await flushMicrotasks();
+
+      expect(() => watchCalls[0].onViewable()).not.toThrow();
+    });
+
+    it("a throwing viewabilityDetector.watch does not prevent the ad from rendering or another slot from processing", async () => {
+      const throwingSlot = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const okSlot = createSlotElement({ "data-platform-id": "p2", "data-ad-type-id": "leaderboard" });
+      document.body.innerHTML = "";
+      document.body.append(throwingSlot, okSlot);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: adWithConfig })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const detector: ViewabilityDetectorLike = {
+        watch: jest.fn((element: Element) => {
+          if (element === throwingSlot) {
+            throw new Error("boom");
+          }
+          return jest.fn();
+        }),
+      };
+      const trackingClient = createFakeTrackingClient();
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector: detector,
+        trackingClient,
+      });
+
+      orchestrator.run(document);
+      await flushMicrotasks();
+
+      expect(renderer.renderAd).toHaveBeenCalledTimes(2);
+    });
   });
 });

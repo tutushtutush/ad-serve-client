@@ -1,6 +1,8 @@
 import { createAdDecisionClient } from "./client/adDecisionClient";
+import { createViewableImpressionClient } from "./client/viewableImpressionClient";
 import { createAdOrchestrator } from "./orchestrator/adOrchestrator";
 import { createAdRenderer } from "./renderer/adRenderer";
+import { createViewabilityDetector } from "./utils/viewabilityDetector";
 
 declare global {
   interface Window {
@@ -36,7 +38,13 @@ function main(): void {
 
       const client = createAdDecisionClient(window.fetch.bind(window), baseUrl);
       const renderer = createAdRenderer(document, baseUrl);
-      const orchestrator = createAdOrchestrator({ client, renderer });
+      const viewabilityDetector = createViewabilityDetector(window.IntersectionObserver);
+      const trackingClient = createViewableImpressionClient(
+        baseUrl,
+        typeof navigator.sendBeacon === "function" ? navigator.sendBeacon.bind(navigator) : undefined,
+        window.fetch.bind(window),
+      );
+      const orchestrator = createAdOrchestrator({ client, renderer, viewabilityDetector, trackingClient });
 
       orchestrator.run(document);
     } catch {
