@@ -1,3 +1,4 @@
+import { asSafeString } from "../utils/asSafeString";
 import type {
   AdCandidate,
   AdDecisionRequest,
@@ -147,14 +148,30 @@ function mapSlotsByGroupPosition(root: ParentNode): Map<string, Element> {
 }
 
 export function createAdOrchestrator({ client, renderer, viewabilityDetector, trackingClient }: AdOrchestratorDeps) {
-  // Marks a slot resolved and stops any viewability watch still pending for it — a slot that
-  // will never render/redisplay again must not leave a live IntersectionObserver behind (FR-007).
-  // Every `slot.resolved = true` assignment goes through here instead of being set directly, so
-  // this cleanup can never be forgotten at a new call site.
+  // Marks a slot resolved and stops any viewability watch still pending for it — used only where
+  // the rendered instance is genuinely gone for good (never rendered, a decision failure, or
+  // removed with no redisplay budget left to bring it back) and so could never become viewable
+  // (FR-007).
   function resolveSlot(slot: TrackedSlot): void {
     slot.resolved = true;
     slot.stopViewabilityWatch?.();
     slot.stopViewabilityWatch = null;
+  }
+
+  // Stops only the redisplay/mutation-tracking bookkeeping for a slot whose rendered element is
+  // still connected and still on the page — deliberately does NOT touch stopViewabilityWatch.
+  // Caught in code review: the FR-008 "quiet batches" settle counter bounds how long to keep
+  // re-checking for *redisplay churn* (a proxy for "has the host page's own hydration/redraw
+  // settled down"), which is an unrelated question from "will the user ever scroll to this ad" —
+  // any unrelated DOM activity elsewhere in the observed subtree (a chat widget, a live ticker)
+  // can produce 10 mutation batches in seconds, long before a viewer scrolls to a slot below the
+  // fold. Routing that case through resolveSlot() would silently stop watching a still-visible-
+  // to-come ad, undercounting real viewable impressions — directly against this feature's core
+  // accuracy guarantee (SC-002). The element being still connected is exactly the signal that
+  // it remains eligible indefinitely; only genuine removal (handled by resolveSlot() elsewhere in
+  // this function) ends eligibility.
+  function settleRedisplayTracking(slot: TrackedSlot): void {
+    slot.resolved = true;
   }
 
   // Starts a fresh viewability watch for a just-rendered instance of `slot`, reporting via
@@ -165,7 +182,13 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
     slot.stopViewabilityWatch?.();
     slot.stopViewabilityWatch = null;
 
-    const adConfigId = slot.ad?.adConfigId;
+    // adConfigId is coerced through asSafeString, same as adRenderer.ts's resolveClickHref does
+    // for the identical field (feature 004) — isAdCandidate() in adDecisionClient.ts never
+    // validates adConfigId's type, so a schema-drifted response (a number/object) must degrade to
+    // "no report attempted", not sail through a truthy check and corrupt the report URL (caught in
+    // code review; reproduced: a non-string adConfigId produced
+    // "adConfigId=%5Bobject+Object%5D").
+    const adConfigId = asSafeString(slot.ad?.adConfigId);
     if (!viewabilityDetector || !trackingClient || !adConfigId) {
       return;
     }
@@ -269,11 +292,14 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
             continue;
           }
 
-          // Rendered, watching for FR-009 (removal) or settling (FR-008).
+          // Rendered, watching for FR-009 (removal) or settling (FR-008). The element is still
+          // connected here — settleRedisplayTracking, not resolveSlot: redisplay-churn watching
+          // no longer being worth it says nothing about whether the ad might still be scrolled
+          // into view later (see settleRedisplayTracking's comment).
           if (slot.renderedElement.isConnected) {
             slot.quietBatchesRemaining -= 1;
             if (slot.quietBatchesRemaining <= 0) {
-              resolveSlot(slot);
+              settleRedisplayTracking(slot);
             }
             continue;
           }

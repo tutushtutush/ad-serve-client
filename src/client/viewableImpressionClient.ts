@@ -1,3 +1,5 @@
+import { buildTrackingUrl } from "../utils/buildTrackingUrl";
+
 export interface ViewableImpressionReport {
   platformId: string;
   adTypeId: string;
@@ -5,7 +7,10 @@ export interface ViewableImpressionReport {
 }
 
 export type SendBeaconLike = (url: string) => boolean;
-export type BeaconFetchLike = (url: string, init: { method: string; keepalive: boolean }) => unknown;
+export type BeaconFetchLike = (
+  url: string,
+  init: { method: string; keepalive: boolean },
+) => Promise<unknown> | unknown;
 
 export interface ViewableImpressionClientLike {
   reportViewableImpression(report: ViewableImpressionReport): void;
@@ -32,17 +37,24 @@ export function createViewableImpressionClient(
     // doesn't control the timing of, and neither transport's failure may ever propagate
     // (Constitution Principle V, FR-006).
     try {
-      const params = new URLSearchParams({
+      const url = buildTrackingUrl(baseUrl, "viewable-impression", {
         platformId: report.platformId,
         adTypeId: report.adTypeId,
         adConfigId: report.adConfigId,
       });
-      const url = `${baseUrl}/viewable-impression?${params.toString()}`;
 
       if (sendBeaconImpl && sendBeaconImpl(url)) {
         return;
       }
-      fetchImpl?.(url, { method: "POST", keepalive: true });
+      // The try/catch above only guards a *synchronous* throw from fetchImpl — a real fetch call
+      // returns a Promise, and a rejection (offline, DNS failure, CORS) would otherwise surface as
+      // an unhandled promise rejection, propagating to the host page's own `unhandledrejection`
+      // listeners regardless of this function's own try/catch (caught in code review — confirmed
+      // by reproducing it against a rejecting fake before this fix).
+      const pending = fetchImpl?.(url, { method: "POST", keepalive: true });
+      if (pending && typeof (pending as { catch?: unknown }).catch === "function") {
+        (pending as Promise<unknown>).catch(() => {});
+      }
     } catch {
       // See comment above.
     }

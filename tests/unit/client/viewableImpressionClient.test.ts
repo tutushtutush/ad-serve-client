@@ -58,6 +58,18 @@ describe("createViewableImpressionClient", () => {
     expect(() => client.reportViewableImpression(REPORT)).not.toThrow();
   });
 
+  it("a rejecting fetch promise does not become an unhandled rejection (caught in code review)", async () => {
+    const fetchImpl = jest.fn(() => Promise.reject(new Error("network down")));
+    const client = createViewableImpressionClient("https://api.example.com", undefined, fetchImpl);
+
+    client.reportViewableImpression(REPORT);
+
+    // If the rejection isn't caught internally, this surfaces as a test-process unhandled
+    // rejection failure even though nothing here awaits or asserts on the promise directly —
+    // exactly the symptom that would otherwise hit a real host page's own listeners.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+
   it("a blank baseUrl attempts neither transport", () => {
     const sendBeacon = jest.fn();
     const fetchImpl = jest.fn();

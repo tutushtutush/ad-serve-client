@@ -1,13 +1,7 @@
 import { escapeForMarkup } from "../utils/escapeForMarkup";
+import { asSafeString } from "../utils/asSafeString";
+import { buildTrackingUrl } from "../utils/buildTrackingUrl";
 import type { AdCandidate, PlacementIdentity, ResolvedAdCreativeRender } from "../types";
-
-// resolvedRender's fields are opaque and optional (types.ts) — a missing
-// field, a missing resolvedRender entirely, or a wrong-typed field must
-// degrade safely rather than crash or produce broken markup (FR-010).
-// Coerce anything non-string to "" before escaping.
-function asSafeString(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
 
 function asSafeBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
@@ -89,12 +83,11 @@ function resolveClickHref(
   if (!safeAdConfigId || !apiBaseUrl) {
     return safeHref;
   }
-  const params = new URLSearchParams({
+  return buildTrackingUrl(apiBaseUrl, "click", {
     platformId: placement.platformId,
     adTypeId: placement.adTypeId,
     adConfigId: safeAdConfigId,
   });
-  return `${apiBaseUrl}/click?${params.toString()}`;
 }
 
 // A small, generic "image" glyph for the background placeholder — hand-drawn

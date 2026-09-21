@@ -272,3 +272,51 @@ dedicated, explicit test coverage.
   Assumptions).
 - **No retry on a failed report**: `sendBeacon`'s own browser-level reliability guarantee (survives
   page unload) is relied on as-is; no application-level retry/queue is added on top of it.
+
+## Code review fixes (round 2, post-PR#6)
+
+A review of PR #6 found 4 real, confirmed issues:
+
+1. **Correctness — a rejecting `fetch` promise became an unhandled promise rejection**, directly
+   violating FR-006/Principle V. `viewableImpressionClient.ts`'s try/catch only guards a
+   *synchronous* throw from `fetchImpl`; a real `fetch()` call returns a Promise, and a rejection
+   (offline, DNS failure, CORS) surfaced as an uncaught `unhandledrejection` on the host page,
+   unguarded. Reproduced against a rejecting fake before the fix (test failed with the raw error);
+   fixed by attaching a no-op `.catch()` to the returned promise when it looks thenable.
+2. **Correctness — `adConfigId` wasn't type-validated before use in the tracking report**, unlike
+   the identical field in `adRenderer.ts`'s `resolveClickHref` (which explicitly coerces it via
+   `asSafeString()`, feature 004). `isAdCandidate()` never validates `adConfigId`'s type, so a
+   schema-drifted response (a number/object) passed the `!adConfigId` truthy check and would have
+   produced a corrupted report URL — reproduced: `new URLSearchParams({adConfigId: {}})` →
+   `adConfigId=%5Bobject+Object%5D`. Fixed by extracting the existing `asSafeString()` helper out
+   of `adRenderer.ts` into a shared `src/utils/asSafeString.ts` and applying it in
+   `startViewabilityWatch` too, closing the gap between the two identical-field call sites rather
+   than just patching one.
+3. **Correctness, highest severity — the FR-008 "quiet mutation batches" redisplay-settle counter
+   also silently stopped a still-connected, still-on-the-page ad's viewability watch**, directly
+   undermining SC-002 for a common real-world case: any unrelated DOM activity elsewhere in the
+   observed subtree (a chat widget, a live ticker — anything, not just this ad) can produce 10
+   mutation batches in seconds, long before a viewer scrolls to a slot below the fold. The
+   `resolveSlot()` helper conflated two unrelated lifetimes — "how long to keep re-checking for
+   redisplay churn" (FR-008, about hydration-mismatch recovery) and "how long the ad remains
+   eligible to be reported viewable" (this feature's entire purpose) — into one. Fixed by
+   splitting into `resolveSlot()` (stops the viewability watch too — used only where the rendered
+   instance is genuinely gone: never rendered, a decision failure, or removed with no redisplay
+   budget left) and a new `settleRedisplayTracking()` (stops only the mutation-tracking
+   bookkeeping, leaves a still-connected element's viewability watch running indefinitely). The
+   pre-existing FR-007 test asserted the old, buggy behavior directly — it was rewritten to assert
+   the fix (watch survives settling while connected) and a new, separate test confirms the
+   genuinely-gone case (redisplay budget exhausted after real removals) still stops the watch.
+4. **Reuse — `adRenderer.ts` and `viewableImpressionClient.ts` each independently built a
+   `{baseUrl}/{path}?platformId=&adTypeId=&adConfigId=` URL via `URLSearchParams` + a template
+   string**, the same pattern duplicated across the click and viewable-impression tracking paths.
+   Extracted a shared `buildTrackingUrl(baseUrl, path, params)` into
+   `src/utils/buildTrackingUrl.ts`, used by both.
+
+115/115 tests pass (5 new: 1 rejecting-fetch regression, 1 non-string-`adConfigId` regression, the
+rewritten + 1 new FR-007 test, 2 for the new shared URL builder), lint/typecheck clean, re-verified
+live against real local ad-serve-api + Postgres: all 4 live-reachable quickstart scenarios produced
+identical results to the pre-round-2 verification (Fix 3's specific failure mode — a below-fold ad
+amid unrelated DOM churn — is proven by its dedicated unit test using fake timers to simulate the
+exact FR-008 quiet-batch mechanism, the same verification depth used for comparable internal-timing
+fixes in this stack's other repos, e.g. ad-serve-api's 007/008/009 round-2 fixes).
