@@ -4,6 +4,9 @@ export interface ViewableImpressionReport {
   platformId: string;
   adTypeId: string;
   adConfigId: string;
+  // ad-serve-api's per-serving dedup key (feature 014/007) — optional, same treatment as every
+  // other field here: absent just means no dedup key is sent, never blocks the report.
+  impressionId?: string;
 }
 
 export type SendBeaconLike = (url: string) => boolean;
@@ -41,6 +44,7 @@ export function createViewableImpressionClient(
         platformId: report.platformId,
         adTypeId: report.adTypeId,
         adConfigId: report.adConfigId,
+        impressionId: report.impressionId,
       });
 
       if (sendBeaconImpl && sendBeaconImpl(url)) {

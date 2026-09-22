@@ -603,6 +603,38 @@ describe("createAdOrchestrator.run", () => {
       });
     });
 
+    it("reports with impressionId when present on the decision response (feature 007, US2)", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const adWithImpression = { ...adWithConfig, impressionId: "imp-1" };
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: adWithImpression })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const { detector, watchCalls } = createFakeViewabilityDetector();
+      const trackingClient = createFakeTrackingClient();
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector: detector,
+        trackingClient,
+      });
+
+      orchestrator.run(document);
+      await flushMicrotasks();
+
+      watchCalls[0].onViewable();
+
+      expect(trackingClient.reportViewableImpression).toHaveBeenCalledWith({
+        platformId: "p1",
+        adTypeId: "banner",
+        adConfigId: "config-1",
+        impressionId: "imp-1",
+      });
+    });
+
     it("never starts a watch when adConfigId is unavailable (FR-004)", async () => {
       const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
@@ -626,6 +658,33 @@ describe("createAdOrchestrator.run", () => {
 
       expect(renderer.renderAd).toHaveBeenCalledTimes(1); // ad still renders
       expect(watchCalls).toHaveLength(0);
+    });
+
+    it("never starts a watch when adConfigId is unavailable, even with impressionId present (feature 007, US3)", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const adWithImpressionOnly = { ...ad, impressionId: "imp-1" }; // no adConfigId
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: adWithImpressionOnly })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const { detector, watchCalls } = createFakeViewabilityDetector();
+      const trackingClient = createFakeTrackingClient();
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector: detector,
+        trackingClient,
+      });
+
+      orchestrator.run(document);
+      await flushMicrotasks();
+
+      expect(renderer.renderAd).toHaveBeenCalledTimes(1); // ad still renders
+      expect(watchCalls).toHaveLength(0);
+      expect(trackingClient.reportViewableImpression).not.toHaveBeenCalled();
     });
 
     it("never reports a non-string adConfigId as-is, degrading like a missing one (caught in code review)", async () => {
@@ -707,6 +766,39 @@ describe("createAdOrchestrator.run", () => {
       // Both watches are independently reportable.
       watchCalls[1].onViewable();
       expect(trackingClient.reportViewableImpression).toHaveBeenCalledTimes(1);
+    });
+
+    it("a redisplay's report reuses the original impressionId, never a new one (feature 007, US2, spec Acceptance Scenario 2)", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const adWithImpression = { ...adWithConfig, impressionId: "imp-1" };
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: adWithImpression })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const { detector, watchCalls } = createFakeViewabilityDetector();
+      const trackingClient = createFakeTrackingClient();
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector: detector,
+        trackingClient,
+      });
+
+      orchestrator.run(document);
+      await flushMicrotasks(); // initial render
+
+      const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      el.replaceWith(replacement);
+      await flushMicrotasks(); // redisplay — same slot.ad, no new decision request
+
+      watchCalls[1].onViewable();
+
+      expect(trackingClient.reportViewableImpression).toHaveBeenCalledWith(
+        expect.objectContaining({ impressionId: "imp-1" }),
+      );
     });
 
     it("keeps a still-pending watch alive when a slot settles via quiet mutation batches while its element stays connected (caught in code review)", async () => {

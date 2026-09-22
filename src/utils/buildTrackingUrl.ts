@@ -5,7 +5,17 @@
 export function buildTrackingUrl(
   baseUrl: string,
   path: string,
-  params: { platformId: string; adTypeId: string; adConfigId: string },
+  params: { platformId: string; adTypeId: string; adConfigId: string; impressionId?: string },
 ): string {
-  return `${baseUrl}/${path}?${new URLSearchParams(params).toString()}`;
+  const searchParams = new URLSearchParams({
+    platformId: params.platformId,
+    adTypeId: params.adTypeId,
+    adConfigId: params.adConfigId,
+  });
+  // Appended only when present (feature 007) — ad-serve-api's own contract treats a missing
+  // impressionId identically to an omitted one, never as an empty-string value to dedup against.
+  if (params.impressionId) {
+    searchParams.set("impressionId", params.impressionId);
+  }
+  return `${baseUrl}/${path}?${searchParams.toString()}`;
 }

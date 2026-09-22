@@ -72,6 +72,11 @@ export interface AdCandidate {
   // (feature 004), never for rendering itself. Optional, same degrade-safely treatment as every
   // other field here: absence falls back to a direct advertiser link, it never blocks rendering.
   adConfigId?: string;
+  // ad-serve-api's identifier for this specific ad serving (feature 014), echoed back on
+  // click/viewable-impression reports so ad-serve-api can dedup repeated reports for the same
+  // serving. Optional and opaque, same treatment as adConfigId: absence just means no dedup key
+  // is sent, it never blocks tracking or rendering (feature 007).
+  impressionId?: string;
 }
 
 export type AdDecisionResult = { status: "filled"; ad: AdCandidate } | { status: "empty" };

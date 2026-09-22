@@ -73,6 +73,7 @@ function toSafeHref(url: string): string | null {
 function resolveClickHref(
   safeHref: string | null,
   adConfigId: unknown,
+  impressionId: unknown,
   placement: PlacementIdentity,
   apiBaseUrl: string,
 ): string | null {
@@ -83,10 +84,15 @@ function resolveClickHref(
   if (!safeAdConfigId || !apiBaseUrl) {
     return safeHref;
   }
+  // impressionId (feature 014/007) gets the same coercion as adConfigId above — it's equally
+  // opaque, upstream-sourced, and never validated by isAdCandidate() in adDecisionClient.ts, so a
+  // schema-drifted response must degrade to "omit it" rather than stringify garbage into the URL.
+  const safeImpressionId = asSafeString(impressionId);
   return buildTrackingUrl(apiBaseUrl, "click", {
     platformId: placement.platformId,
     adTypeId: placement.adTypeId,
     adConfigId: safeAdConfigId,
+    impressionId: safeImpressionId || undefined,
   });
 }
 
@@ -153,7 +159,7 @@ function buildCreativeMarkup(ad: AdCandidate, apiBaseUrl: string, placement: Pla
   // resolveClickHref only ever changes *where* an already-clickable ad points, routing through
   // ad-serve-api's click endpoint when possible and falling back to safeHref itself otherwise
   // (feature 004, FR-003).
-  const clickHref = resolveClickHref(safeHref, ad.adConfigId, placement, apiBaseUrl);
+  const clickHref = resolveClickHref(safeHref, ad.adConfigId, ad.impressionId, placement, apiBaseUrl);
   // tag and attrs are derived together, not via separate parallel ternaries
   // on the same condition, so they can never diverge into a mismatched
   // open/close tag pair (code review round 2). The non-interactive case uses
