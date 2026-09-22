@@ -35,6 +35,22 @@ describe("createAdDecisionClient", () => {
     expect(url).toBe(`${baseUrl}/ads?platformId=plat-1&adTypeId=banner`);
   });
 
+  it("includes sessionId in the query string when present (008)", async () => {
+    const fetchImpl: FetchLike = jest.fn(async () => jsonResponse(true, { ad: null }));
+    const client = createAdDecisionClient(fetchImpl, baseUrl);
+
+    await client.requestAd({
+      platformId: "plat-1",
+      adTypeId: "banner",
+      sessionId: "44444444-4444-4444-4444-444444444444",
+    });
+
+    const [url] = (fetchImpl as jest.Mock).mock.calls[0];
+    expect(url).toBe(
+      `${baseUrl}/ads?platformId=plat-1&adTypeId=banner&sessionId=44444444-4444-4444-4444-444444444444`,
+    );
+  });
+
   it("returns filled when ad-serve-api returns a winning ad", async () => {
     const fetchImpl: FetchLike = jest.fn(async () =>
       jsonResponse(true, { ad: { creative, width: 300, height: 250 } }),

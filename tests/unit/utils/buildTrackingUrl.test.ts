@@ -55,4 +55,53 @@ describe("buildTrackingUrl", () => {
       }),
     ).toBe("https://api.example.com/click?platformId=p1&adTypeId=medium-rectangle&adConfigId=c1");
   });
+
+  it("includes sessionId in the query string when provided (008)", () => {
+    expect(
+      buildTrackingUrl("https://api.example.com", "click", {
+        platformId: "p1",
+        adTypeId: "medium-rectangle",
+        adConfigId: "c1",
+        sessionId: "sess-1",
+      }),
+    ).toBe(
+      "https://api.example.com/click?platformId=p1&adTypeId=medium-rectangle&adConfigId=c1&sessionId=sess-1",
+    );
+  });
+
+  it("omits sessionId entirely when not provided", () => {
+    expect(
+      buildTrackingUrl("https://api.example.com", "click", {
+        platformId: "p1",
+        adTypeId: "medium-rectangle",
+        adConfigId: "c1",
+        sessionId: undefined,
+      }),
+    ).toBe("https://api.example.com/click?platformId=p1&adTypeId=medium-rectangle&adConfigId=c1");
+  });
+
+  it("omits sessionId when it's an empty string", () => {
+    expect(
+      buildTrackingUrl("https://api.example.com", "click", {
+        platformId: "p1",
+        adTypeId: "medium-rectangle",
+        adConfigId: "c1",
+        sessionId: "",
+      }),
+    ).toBe("https://api.example.com/click?platformId=p1&adTypeId=medium-rectangle&adConfigId=c1");
+  });
+
+  it("includes both impressionId and sessionId together, in order, when both are provided", () => {
+    expect(
+      buildTrackingUrl("https://api.example.com", "click", {
+        platformId: "p1",
+        adTypeId: "medium-rectangle",
+        adConfigId: "c1",
+        impressionId: "imp-1",
+        sessionId: "sess-1",
+      }),
+    ).toBe(
+      "https://api.example.com/click?platformId=p1&adTypeId=medium-rectangle&adConfigId=c1&impressionId=imp-1&sessionId=sess-1",
+    );
+  });
 });

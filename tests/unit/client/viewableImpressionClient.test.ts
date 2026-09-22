@@ -108,4 +108,26 @@ describe("createViewableImpressionClient", () => {
       "https://api.example.com/viewable-impression?platformId=platform-1&adTypeId=medium-rectangle&adConfigId=ad-config-1",
     );
   });
+
+  it("includes sessionId in the reported URL when provided (feature 008)", () => {
+    const sendBeacon = jest.fn().mockReturnValue(true);
+    const client = createViewableImpressionClient("https://api.example.com", sendBeacon, undefined);
+
+    client.reportViewableImpression({ ...REPORT, sessionId: "sess-1" });
+
+    expect(sendBeacon).toHaveBeenCalledWith(
+      "https://api.example.com/viewable-impression?platformId=platform-1&adTypeId=medium-rectangle&adConfigId=ad-config-1&sessionId=sess-1",
+    );
+  });
+
+  it("omits sessionId from the reported URL when absent, unchanged from before this feature", () => {
+    const sendBeacon = jest.fn().mockReturnValue(true);
+    const client = createViewableImpressionClient("https://api.example.com", sendBeacon, undefined);
+
+    client.reportViewableImpression(REPORT);
+
+    expect(sendBeacon).toHaveBeenCalledWith(
+      "https://api.example.com/viewable-impression?platformId=platform-1&adTypeId=medium-rectangle&adConfigId=ad-config-1",
+    );
+  });
 });

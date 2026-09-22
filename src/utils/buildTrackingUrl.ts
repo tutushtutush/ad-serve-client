@@ -5,7 +5,13 @@
 export function buildTrackingUrl(
   baseUrl: string,
   path: string,
-  params: { platformId: string; adTypeId: string; adConfigId: string; impressionId?: string },
+  params: {
+    platformId: string;
+    adTypeId: string;
+    adConfigId: string;
+    impressionId?: string;
+    sessionId?: string;
+  },
 ): string {
   const searchParams = new URLSearchParams({
     platformId: params.platformId,
@@ -16,6 +22,10 @@ export function buildTrackingUrl(
   // impressionId identically to an omitted one, never as an empty-string value to dedup against.
   if (params.impressionId) {
     searchParams.set("impressionId", params.impressionId);
+  }
+  // Same treatment for sessionId (feature 008) — appended only when present.
+  if (params.sessionId) {
+    searchParams.set("sessionId", params.sessionId);
   }
   return `${baseUrl}/${path}?${searchParams.toString()}`;
 }

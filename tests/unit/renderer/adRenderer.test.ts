@@ -13,11 +13,12 @@ function renderAndGetSrcdoc(
   ad: AdCandidate,
   apiBaseUrl: string = API_BASE_URL,
   placement: PlacementIdentity = PLACEMENT,
+  sessionId?: string,
 ): string {
   document.body.innerHTML = "";
   const slot = document.createElement("div");
   document.body.append(slot);
-  createAdRenderer(document, apiBaseUrl).renderAd(slot, ad, placement);
+  createAdRenderer(document, apiBaseUrl).renderAd(slot, ad, placement, sessionId);
   return slot.querySelector("iframe")?.getAttribute("srcdoc") ?? "";
 }
 
@@ -402,6 +403,36 @@ describe("createAdRenderer", () => {
       const url = new URL(hrefMatch![1].replace(/&amp;/g, "&"));
       expect(url.searchParams.has("impressionId")).toBe(false);
       expect(markup).not.toContain("object+Object");
+    });
+  });
+
+  describe("session id attached to click tracking (feature 008, US2)", () => {
+    it("includes sessionId as a query parameter when supplied to renderAd", () => {
+      const ad = {
+        ...makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }),
+        adConfigId: "ad-1",
+      };
+
+      const markup = renderAndGetSrcdoc(ad, API_BASE_URL, PLACEMENT, "sess-1");
+
+      const hrefMatch = markup.match(/<a href="([^"]+)"/);
+      expect(hrefMatch).not.toBeNull();
+      const url = new URL(hrefMatch![1].replace(/&amp;/g, "&"));
+      expect(url.searchParams.get("sessionId")).toBe("sess-1");
+    });
+
+    it("omits sessionId from the click URL when absent, unchanged from before this feature", () => {
+      const ad = {
+        ...makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }),
+        adConfigId: "ad-1",
+      };
+
+      const markup = renderAndGetSrcdoc(ad, API_BASE_URL, PLACEMENT);
+
+      const hrefMatch = markup.match(/<a href="([^"]+)"/);
+      expect(hrefMatch).not.toBeNull();
+      const url = new URL(hrefMatch![1].replace(/&amp;/g, "&"));
+      expect(url.searchParams.has("sessionId")).toBe(false);
     });
   });
 

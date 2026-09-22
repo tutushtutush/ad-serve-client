@@ -100,7 +100,12 @@ describe("createAdOrchestrator.run", () => {
     orchestrator.run(document);
     await new Promise(process.nextTick);
 
-    expect(renderer.renderAd).toHaveBeenCalledWith(el, ad, { platformId: "p1", adTypeId: "banner" });
+    expect(renderer.renderAd).toHaveBeenCalledWith(
+      el,
+      ad,
+      { platformId: "p1", adTypeId: "banner" },
+      undefined,
+    );
   });
 
   it("never calls the client for an invalid slot", async () => {
@@ -173,10 +178,12 @@ describe("createAdOrchestrator.run", () => {
     await new Promise(process.nextTick);
 
     expect(renderer.renderAd).toHaveBeenCalledTimes(1);
-    expect(renderer.renderAd).toHaveBeenCalledWith(fastSlot, ad, {
-      platformId: "p2",
-      adTypeId: "leaderboard",
-    });
+    expect(renderer.renderAd).toHaveBeenCalledWith(
+      fastSlot,
+      ad,
+      { platformId: "p2", adTypeId: "leaderboard" },
+      undefined,
+    );
   });
 
   // --- 002-resilient-slot-discovery ---
@@ -1007,6 +1014,81 @@ describe("createAdOrchestrator.run", () => {
       await flushMicrotasks();
 
       expect(renderer.renderAd).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // --- 008-originate-a-client-side ---
+
+  describe("visitor session identifier threading (feature 008)", () => {
+    it("US2: forwards the identical sessionId to requestAd, reportViewableImpression, and renderAd across two slots", async () => {
+      const elA = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const elB = createSlotElement({ "data-platform-id": "p2", "data-ad-type-id": "leaderboard" });
+      document.body.innerHTML = "";
+      document.body.append(elA, elB);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: adWithConfig })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const { detector, watchCalls } = createFakeViewabilityDetector();
+      const trackingClient = createFakeTrackingClient();
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector: detector,
+        trackingClient,
+        sessionId: "sess-shared",
+      });
+
+      orchestrator.run(document);
+      await flushMicrotasks();
+
+      expect(client.requestAd).toHaveBeenCalledTimes(2);
+      for (const call of (client.requestAd as jest.Mock).mock.calls) {
+        expect(call[0]).toEqual(expect.objectContaining({ sessionId: "sess-shared" }));
+      }
+      expect(renderer.renderAd).toHaveBeenCalledTimes(2);
+      for (const call of (renderer.renderAd as jest.Mock).mock.calls) {
+        expect(call[3]).toBe("sess-shared");
+      }
+
+      watchCalls[0].onViewable();
+      expect(trackingClient.reportViewableImpression).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: "sess-shared" }),
+      );
+    });
+
+    it("US3: an orchestrator with no sessionId behaves identically to before this feature — no field, no error", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: adWithConfig })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const { detector, watchCalls } = createFakeViewabilityDetector();
+      const trackingClient = createFakeTrackingClient();
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector: detector,
+        trackingClient,
+        sessionId: undefined,
+      });
+
+      orchestrator.run(document);
+      await flushMicrotasks();
+
+      expect(client.requestAd).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: undefined }),
+      );
+      expect(renderer.renderAd).toHaveBeenCalledWith(el, adWithConfig, expect.anything(), undefined);
+
+      watchCalls[0].onViewable();
+      expect(trackingClient.reportViewableImpression).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: undefined }),
+      );
     });
   });
 
