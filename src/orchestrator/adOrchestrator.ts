@@ -124,6 +124,13 @@ interface TrackedSlot {
   // starts for the new element, FR-003) and whenever the slot is marked resolved (FR-007) —
   // see resolveSlot/startViewabilityWatch below (feature 005).
   stopViewabilityWatch: (() => void) | null;
+  // This slot's own run() call's disconnectIfAllResolved (feature 009) — set once, at creation.
+  // resolveSlot/settleRedisplayTracking call this instead of a single shared outer pointer, so one
+  // run() call's slots can never trigger a *different* run() call's disconnect check (the bug a
+  // prior version of this file documented but didn't fix: a second run() call would overwrite the
+  // first's pointer, leaking the first call's MutationObserver or disconnecting it on the wrong
+  // condition).
+  notifySettled: () => void;
   // True once a viewable impression has been reported for this slot's ad. A redisplay reuses the
   // same already-fetched slot.ad (FR-009, research.md) rather than requesting a new one, so this
   // flag is scoped per slot rather than per (slot, redisplay instance) — it stays valid identity
@@ -193,30 +200,24 @@ export function createAdOrchestrator({
   trackingClient,
   sessionId,
 }: AdOrchestratorDeps) {
-  // Set once per run() call, to that call's own disconnectIfAllResolved (feature 006) — resolveSlot
-  // and settleRedisplayTracking live in this outer scope, while disconnectIfAllResolved is private
-  // to run()'s closure, so without this neither could ever prompt the top-level "is everything
-  // done" check to re-run. That check is otherwise only invoked from specific call sites (end of
-  // processMutationBatch, and runSlot(...).finally(...)) — never automatically just because a slot
-  // becomes resolved. Caught in review while planning feature 006: without this, a slot settled by
-  // the new wall-clock fallback on an otherwise-quiet page would mark itself resolved internally
-  // but never actually release the top-level MutationObserver/trackedSlots array — the exact
-  // resource this feature exists to bound. Assumes run() is called at most once per orchestrator
-  // instance (matches index.ts's actual usage); a future caller invoking run() more than once with
-  // overlapping in-flight slots would need this reworked, since this reference only ever points at
-  // the most recently started run() call.
-  let notifySlotSettled: (() => void) | null = null;
+  // Every element any run() call on this instance has already turned into a TrackedSlot — at
+  // initial discovery, and again on each redisplay's replacement element (feature 009). A later
+  // run() call's discovery loop skips any element already in here, so a readiness signal whose
+  // scanned region overlaps previously-handled content never re-requests or re-renders an
+  // already-claimed slot (FR-003). A WeakSet needs no manual cleanup: an element that's later
+  // garbage-collected (removed from the DOM with nothing else referencing it) simply drops out.
+  const claimedElements = new WeakSet<Element>();
 
   // Wrapped, not called directly — caught in review of #10: unlike every other schedule-driven
-  // entry point in this file, a bare `notifySlotSettled?.()` had no guard of its own. If
-  // `disconnectIfAllResolved()` itself ever threw (a hostile/patched host-page global, a broken
+  // entry point in this file, a bare call to a slot's notify hook had no guard of its own. If
+  // `slot.notifySettled()` itself ever threw (a hostile/patched host-page global, a broken
   // MutationObserver polyfill), the throw would propagate out of resolveSlot()/
   // settleRedisplayTracking() — including out of runSlot()'s own catch block, which calls
   // resolveSlot() again on failure, risking an unhandled rejection on runSlot(...).finally(...)
   // reaching the host page (Constitution Principle V).
-  function safeNotifySlotSettled(): void {
+  function safeNotifySettled(slot: TrackedSlot): void {
     try {
-      notifySlotSettled?.();
+      slot.notifySettled();
     } catch {
       // See comment above.
     }
@@ -234,7 +235,7 @@ export function createAdOrchestrator({
       clearTimeout(slot.settleTimer);
       slot.settleTimer = null;
     }
-    safeNotifySlotSettled();
+    safeNotifySettled(slot);
   }
 
   // Stops only the redisplay/mutation-tracking bookkeeping for a slot whose rendered element is
@@ -255,7 +256,7 @@ export function createAdOrchestrator({
       clearTimeout(slot.settleTimer);
       slot.settleTimer = null;
     }
-    safeNotifySlotSettled();
+    safeNotifySettled(slot);
   }
 
   // Restarts slot's wall-clock settle fallback (feature 006) — called every time it's (re)rendered,
@@ -387,7 +388,20 @@ export function createAdOrchestrator({
   function run(root: Node & ParentNode): void {
     const trackedSlots: TrackedSlot[] = [];
 
+    function disconnectIfAllResolved(): void {
+      if (trackedSlots.every((slot) => slot.resolved)) {
+        observer.disconnect();
+      }
+    }
+
+    // Elements already claimed by an earlier run() call (or a redisplay within one) are skipped
+    // here (feature 009, FR-003) — never re-requested or re-rendered just because this call's root
+    // happens to overlap previously-handled content.
     for (const { element, config, groupKey, groupPosition } of groupDiscoveredSlots(root)) {
+      if (claimedElements.has(element)) {
+        continue;
+      }
+      claimedElements.add(element);
       trackedSlots.push({
         config,
         groupKey,
@@ -401,22 +415,14 @@ export function createAdOrchestrator({
         stopViewabilityWatch: null,
         viewableImpressionReported: false,
         settleTimer: null,
+        // This call's own disconnectIfAllResolved (feature 009) — see TrackedSlot.notifySettled.
+        notifySettled: disconnectIfAllResolved,
       });
     }
 
     if (trackedSlots.length === 0) {
-      return; // nothing to track, nothing to observe
+      return; // nothing new to track, nothing to observe
     }
-
-    function disconnectIfAllResolved(): void {
-      if (trackedSlots.every((slot) => slot.resolved)) {
-        observer.disconnect();
-      }
-    }
-
-    // See notifySlotSettled's declaration above (feature 006): resolveSlot/settleRedisplayTracking
-    // are defined outside this closure and otherwise have no way to prompt this exact check.
-    notifySlotSettled = disconnectIfAllResolved;
 
     function processMutationBatch(): void {
       try {
@@ -477,6 +483,10 @@ export function createAdOrchestrator({
             sessionId,
           );
           slot.renderedElement = current;
+          // The replacement element is claimed too (feature 009), not just the originally
+          // discovered one — otherwise a later run() call whose root happens to include this
+          // replacement (rather than the element it replaced) would mistake it for a new slot.
+          claimedElements.add(current);
           slot.redisplaysRemaining -= 1;
           slot.quietBatchesRemaining = INITIAL_QUIET_BATCHES_REMAINING;
           // A redisplayed instance is independently eligible to be reported again — a fresh
