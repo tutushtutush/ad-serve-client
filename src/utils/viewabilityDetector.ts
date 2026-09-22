@@ -3,6 +3,17 @@
 const VIEWABILITY_THRESHOLD = 0.5;
 const VIEWABILITY_DURATION_MS = 1000;
 
+// Caught in review (eventpulse #58 / ad-serve-client #7): a slot's viewability watch is
+// deliberately kept running for as long as its rendered element stays connected, even after
+// redisplay-tracking itself has settled (adOrchestrator.ts's settleRedisplayTracking) — a below-
+// fold ad must stay eligible to be reported whenever the viewer eventually scrolls to it (SC-002).
+// But with no upper bound, an ad that's never scrolled into view keeps its IntersectionObserver
+// (and the closure capturing the full ad creative, including base64 image fields) alive for the
+// entire page lifetime. This wall-clock cap bounds that: past this point the watch gives up and
+// releases its resources, the same "no report" outcome as if viewability were simply never
+// reached, rather than the watch itself becoming an unbounded leak.
+const MAX_WATCH_DURATION_MS = 2 * 60 * 1000;
+
 export interface ViewabilityDetectorLike {
   // Starts watching `element`. Calls `onViewable` at most once, the first time the IAB
   // viewability condition is satisfied. Returns a `stop()` function that cancels the watch —
@@ -40,6 +51,7 @@ export function createViewabilityDetector(
       }
       stopped = true;
       clearPendingTimer();
+      clearTimeout(maxDurationTimer);
       observer.disconnect();
     }
 
@@ -76,6 +88,13 @@ export function createViewabilityDetector(
     );
 
     observer.observe(element);
+
+    // Bounds the watch's lifetime regardless of whether the IAB threshold is ever reached — see
+    // MAX_WATCH_DURATION_MS above. Routed through the same stop() as every other path (and so
+    // cleared by it too), making this a plain no-op if the threshold already fired or the caller
+    // already stopped the watch first.
+    const maxDurationTimer = setTimeout(stop, MAX_WATCH_DURATION_MS);
+
     return stop;
   }
 

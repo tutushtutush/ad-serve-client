@@ -779,6 +779,42 @@ describe("createAdOrchestrator.run", () => {
       expect(lastWatch.stop).toHaveBeenCalledTimes(1);
     });
 
+    it("does not report a duplicate viewable impression across redisplays once already reported (ad-serve-client #7)", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: adWithConfig })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const { detector, watchCalls } = createFakeViewabilityDetector();
+      const trackingClient = createFakeTrackingClient();
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector: detector,
+        trackingClient,
+      });
+
+      orchestrator.run(document);
+      await flushMicrotasks(); // initial render
+      expect(watchCalls).toHaveLength(1);
+
+      // Reported once, before any redisplay.
+      watchCalls[0].onViewable();
+      expect(trackingClient.reportViewableImpression).toHaveBeenCalledTimes(1);
+
+      // A redisplay after the report must not start a new watch at all — nothing left to report.
+      const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      el.replaceWith(replacement);
+      await flushMicrotasks();
+
+      expect(renderer.renderAd).toHaveBeenCalledTimes(2); // still redisplays the ad itself
+      expect(watchCalls).toHaveLength(1); // but no second watch
+      expect(trackingClient.reportViewableImpression).toHaveBeenCalledTimes(1); // no duplicate report
+    });
+
     it("a throwing trackingClient.reportViewableImpression does not propagate", async () => {
       const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
       document.body.innerHTML = "";

@@ -100,6 +100,15 @@ interface TrackedSlot {
   // starts for the new element, FR-003) and whenever the slot is marked resolved (FR-007) —
   // see resolveSlot/startViewabilityWatch below (feature 005).
   stopViewabilityWatch: (() => void) | null;
+  // True once a viewable impression has been reported for this slot's ad. A redisplay reuses the
+  // same already-fetched slot.ad (FR-009, research.md) rather than requesting a new one, so this
+  // flag is scoped per slot rather than per (slot, redisplay instance) — it stays valid identity
+  // for the ad across every redisplay. Caught in review (eventpulse #58 / ad-serve-client #7): a
+  // slot redisplayed within its budget (default 3 extra attempts) started an independent watch
+  // each time with no memory of a prior report, so a single ad shown once could produce up to 4
+  // duplicate viewable-impression events. Checked at the top of startViewabilityWatch so a
+  // redisplay after reporting doesn't even start a new IntersectionObserver.
+  viewableImpressionReported: boolean;
 }
 
 interface GroupedSlotElement {
@@ -182,6 +191,13 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
     slot.stopViewabilityWatch?.();
     slot.stopViewabilityWatch = null;
 
+    // Already reported for this slot's ad on an earlier (re)display — nothing left to watch for,
+    // and starting another observer would risk yet another duplicate report (see
+    // viewableImpressionReported's doc comment on TrackedSlot).
+    if (slot.viewableImpressionReported) {
+      return;
+    }
+
     // adConfigId is coerced through asSafeString, same as adRenderer.ts's resolveClickHref does
     // for the identical field (feature 004) — isAdCandidate() in adDecisionClient.ts never
     // validates adConfigId's type, so a schema-drifted response (a number/object) must degrade to
@@ -195,6 +211,7 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
 
     slot.stopViewabilityWatch = viewabilityDetector.watch(element, () => {
       slot.stopViewabilityWatch = null;
+      slot.viewableImpressionReported = true;
       // Wrapped here too, not just inside viewabilityDetector.ts's own callback — this closure is
       // itself an entry point invoked on a schedule this SDK doesn't control, and defense-in-depth
       // (this codebase's established pattern: never trust a single layer's contract alone) means
@@ -264,6 +281,7 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
         redisplaysRemaining: INITIAL_REDISPLAYS_REMAINING,
         quietBatchesRemaining: INITIAL_QUIET_BATCHES_REMAINING,
         stopViewabilityWatch: null,
+        viewableImpressionReported: false,
       });
     }
 

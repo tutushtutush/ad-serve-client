@@ -183,6 +183,40 @@ describe("createViewabilityDetector", () => {
     expect(() => jest.advanceTimersByTime(1000)).not.toThrow();
   });
 
+  it("stops the observer and never calls onViewable if the IAB threshold is never reached within the max watch duration (ad-serve-client #7)", () => {
+    const detector = createViewabilityDetector(
+      FakeIntersectionObserver as unknown as typeof IntersectionObserver,
+    );
+    const onViewable = jest.fn();
+
+    detector.watch(fakeElement(), onViewable);
+    const observer = FakeIntersectionObserver.instances[0];
+
+    jest.advanceTimersByTime(2 * 60 * 1000);
+
+    expect(onViewable).not.toHaveBeenCalled();
+    expect(observer.disconnected).toBe(true);
+  });
+
+  it("does not stop early: the max watch duration timer is cleared once onViewable fires", () => {
+    const detector = createViewabilityDetector(
+      FakeIntersectionObserver as unknown as typeof IntersectionObserver,
+    );
+    const onViewable = jest.fn();
+
+    detector.watch(fakeElement(), onViewable);
+    const observer = FakeIntersectionObserver.instances[0];
+
+    observer.emit(true, 0.6);
+    jest.advanceTimersByTime(1000);
+    expect(onViewable).toHaveBeenCalledTimes(1);
+
+    // The max-duration timer firing afterward must not do anything further (no throw, no second
+    // disconnect side effect worth observing beyond what already happened).
+    expect(() => jest.advanceTimersByTime(2 * 60 * 1000)).not.toThrow();
+    expect(onViewable).toHaveBeenCalledTimes(1);
+  });
+
   describe("unsupported browser (FR-005)", () => {
     it("watch() returns a working no-op stop and never calls onViewable", () => {
       const detector = createViewabilityDetector(undefined);
