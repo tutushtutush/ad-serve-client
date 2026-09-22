@@ -19,6 +19,21 @@ function getApiBaseUrl(): string {
   return scriptEl?.getAttribute("data-api-base-url") ?? "";
 }
 
+// A bare `window.sessionStorage` property read can itself throw (e.g. a sandboxed iframe missing
+// allow-same-origin, or a browser/privacy configuration that blocks storage access) — this must
+// be guarded independently of getOrCreateSessionId's own try/catch, since that only wraps the
+// function body, not evaluating this expression in main()'s call-site argument list. An unguarded
+// throw here would propagate out of the whole argument list, aborting main()'s try block before
+// the orchestrator/client/renderer are even constructed — breaking ad serving entirely for this
+// page load, not just leaving sessionId absent (caught in code review).
+function getSessionStorageSafely(): Storage | undefined {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return undefined;
+  }
+}
+
 function runWhenPageReady(callback: () => void): void {
   // This script loads via <script async>, which can execute before the
   // rest of the page's HTML (including slot elements below it) has been
@@ -50,7 +65,7 @@ function main(): void {
       // or crypto.randomUUID is unavailable, which every downstream call site already treats as
       // "omit this field" (Fail-Silent, Constitution Principle V).
       const sessionId = getOrCreateSessionId(
-        window.sessionStorage,
+        getSessionStorageSafely(),
         typeof window.crypto?.randomUUID === "function"
           ? window.crypto.randomUUID.bind(window.crypto)
           : undefined,
