@@ -1,5 +1,6 @@
 import { asSafeString } from "../utils/asSafeString";
 import type { ViewabilityDetectorLike } from "../utils/viewabilityDetector";
+import type { ViewableImpressionReport } from "../client/viewableImpressionClient";
 import type {
   AdCandidate,
   AdDecisionRequest,
@@ -24,12 +25,7 @@ export interface AdRendererLike {
 }
 
 export interface ViewableImpressionClientLike {
-  reportViewableImpression(report: {
-    platformId: string;
-    adTypeId: string;
-    adConfigId: string;
-    impressionId?: string;
-  }): void;
+  reportViewableImpression(report: ViewableImpressionReport): void;
 }
 
 export interface AdOrchestratorDeps {
