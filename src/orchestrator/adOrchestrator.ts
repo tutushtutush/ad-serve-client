@@ -16,7 +16,7 @@ export interface AdRendererLike {
 }
 
 export interface ViewabilityDetectorLike {
-  watch(element: Element, onViewable: () => void): () => void;
+  watch(element: Element, onViewable: () => void, onGiveUp?: () => void): () => void;
 }
 
 export interface ViewableImpressionClientLike {
@@ -227,6 +227,12 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
       } catch {
         // See comment above.
       }
+    }, () => {
+      // The watch gave up on its own (MAX_WATCH_DURATION_MS elapsed, viewabilityDetector.ts) —
+      // its stop() is now inert, so the documented invariant on stopViewabilityWatch ("null when
+      // none is pending ... or already stopped") requires nulling it here too, not just on the
+      // onViewable path above (caught in code review of #8).
+      slot.stopViewabilityWatch = null;
     });
   }
 

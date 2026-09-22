@@ -12,13 +12,18 @@ const VIEWABILITY_DURATION_MS = 1000;
 // entire page lifetime. This wall-clock cap bounds that: past this point the watch gives up and
 // releases its resources, the same "no report" outcome as if viewability were simply never
 // reached, rather than the watch itself becoming an unbounded leak.
-const MAX_WATCH_DURATION_MS = 2 * 60 * 1000;
+export const MAX_WATCH_DURATION_MS = 2 * 60 * 1000;
 
 export interface ViewabilityDetectorLike {
   // Starts watching `element`. Calls `onViewable` at most once, the first time the IAB
   // viewability condition is satisfied. Returns a `stop()` function that cancels the watch —
   // safe to call at any time, including after `onViewable` has already fired (a no-op then).
-  watch(element: Element, onViewable: () => void): () => void;
+  // `onGiveUp`, if supplied, is called at most once instead of `onViewable` if
+  // MAX_WATCH_DURATION_MS elapses with the threshold never reached — the caller's signal that
+  // this watch's `stop()` reference is now stale/inert (see adOrchestrator.ts's
+  // stopViewabilityWatch field), since internally self-stopping this way is otherwise
+  // indistinguishable from still being active.
+  watch(element: Element, onViewable: () => void, onGiveUp?: () => void): () => void;
 }
 
 /**
@@ -30,7 +35,7 @@ export interface ViewabilityDetectorLike {
 export function createViewabilityDetector(
   IntersectionObserverImpl: typeof IntersectionObserver | undefined,
 ): ViewabilityDetectorLike {
-  function watch(element: Element, onViewable: () => void): () => void {
+  function watch(element: Element, onViewable: () => void, onGiveUp?: () => void): () => void {
     if (!IntersectionObserverImpl) {
       return () => {};
     }
@@ -90,10 +95,18 @@ export function createViewabilityDetector(
     observer.observe(element);
 
     // Bounds the watch's lifetime regardless of whether the IAB threshold is ever reached — see
-    // MAX_WATCH_DURATION_MS above. Routed through the same stop() as every other path (and so
-    // cleared by it too), making this a plain no-op if the threshold already fired or the caller
-    // already stopped the watch first.
-    const maxDurationTimer = setTimeout(stop, MAX_WATCH_DURATION_MS);
+    // MAX_WATCH_DURATION_MS above. stop() itself clears this timer too, making this a plain no-op
+    // if the threshold already fired or the caller already stopped the watch first. Wrapped in
+    // try/catch for the same reason as every other timer callback in this file (Constitution
+    // Principle V): this runs on a schedule this SDK doesn't control.
+    const maxDurationTimer = setTimeout(() => {
+      try {
+        stop();
+        onGiveUp?.();
+      } catch {
+        // See comment above.
+      }
+    }, MAX_WATCH_DURATION_MS);
 
     return stop;
   }
