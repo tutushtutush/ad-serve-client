@@ -192,6 +192,21 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
   // the most recently started run() call.
   let notifySlotSettled: (() => void) | null = null;
 
+  // Wrapped, not called directly — caught in review of #10: unlike every other schedule-driven
+  // entry point in this file, a bare `notifySlotSettled?.()` had no guard of its own. If
+  // `disconnectIfAllResolved()` itself ever threw (a hostile/patched host-page global, a broken
+  // MutationObserver polyfill), the throw would propagate out of resolveSlot()/
+  // settleRedisplayTracking() — including out of runSlot()'s own catch block, which calls
+  // resolveSlot() again on failure, risking an unhandled rejection on runSlot(...).finally(...)
+  // reaching the host page (Constitution Principle V).
+  function safeNotifySlotSettled(): void {
+    try {
+      notifySlotSettled?.();
+    } catch {
+      // See comment above.
+    }
+  }
+
   // Marks a slot resolved and stops any viewability watch still pending for it — used only where
   // the rendered instance is genuinely gone for good (never rendered, a decision failure, or
   // removed with no redisplay budget left to bring it back) and so could never become viewable
@@ -204,7 +219,7 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
       clearTimeout(slot.settleTimer);
       slot.settleTimer = null;
     }
-    notifySlotSettled?.();
+    safeNotifySlotSettled();
   }
 
   // Stops only the redisplay/mutation-tracking bookkeeping for a slot whose rendered element is
@@ -225,7 +240,7 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
       clearTimeout(slot.settleTimer);
       slot.settleTimer = null;
     }
-    notifySlotSettled?.();
+    safeNotifySlotSettled();
   }
 
   // Restarts slot's wall-clock settle fallback (feature 006) — called every time it's (re)rendered,
