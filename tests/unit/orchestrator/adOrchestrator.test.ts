@@ -2,6 +2,7 @@ import {
   createAdOrchestrator,
   discoverSlots,
   parseSlotConfig,
+  REDISPLAY_SETTLE_TIMEOUT_MS,
   type AdDecisionClientLike,
   type AdRendererLike,
   type ViewabilityDetectorLike,
@@ -914,6 +915,199 @@ describe("createAdOrchestrator.run", () => {
       await flushMicrotasks();
 
       expect(renderer.renderAd).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // --- 006-settle-redisplay-tracking-via ---
+
+  describe("wall-clock redisplay settle fallback", () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it("settles via the wall-clock fallback on a page that produces no further mutations, and actually releases the top-level MutationObserver (ad-serve-client#9)", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const orchestrator = createAdOrchestrator({ client, renderer });
+
+      // A prototype-wide spy would also catch disconnect() calls from *other* tests' still-active
+      // MutationObservers sharing this same jsdom `document` (e.g. a hung-promise test whose
+      // observer never disconnects) — capture only the specific instance this test's own run()
+      // call constructs, so the assertion below is isolated to this test's own resource.
+      const RealMutationObserver = globalThis.MutationObserver;
+      const capturedObservers: MutationObserver[] = [];
+      globalThis.MutationObserver = new Proxy(RealMutationObserver, {
+        construct(target, args) {
+          const instance = new target(...(args as ConstructorParameters<typeof MutationObserver>));
+          capturedObservers.push(instance);
+          return instance;
+        },
+      });
+
+      try {
+        orchestrator.run(document);
+        expect(capturedObservers).toHaveLength(1);
+        const disconnectSpy = jest.spyOn(capturedObservers[0], "disconnect");
+
+        await jest.advanceTimersByTimeAsync(0); // initial render
+
+        expect(renderer.renderAd).toHaveBeenCalledTimes(1);
+        expect(disconnectSpy).not.toHaveBeenCalled(); // still within the window, nothing settled yet
+
+        await jest.advanceTimersByTimeAsync(REDISPLAY_SETTLE_TIMEOUT_MS);
+
+        // Proves the notifySlotSettled wiring actually works — not just that the slot's own
+        // `resolved` flag flipped internally, but that the top-level resource was really released.
+        expect(disconnectSpy).toHaveBeenCalled();
+
+        // Tracking already settled — a later removal produces no redisplay.
+        el.remove();
+        await jest.advanceTimersByTimeAsync(0);
+        expect(renderer.renderAd).toHaveBeenCalledTimes(1);
+      } finally {
+        globalThis.MutationObserver = RealMutationObserver;
+      }
+    });
+
+    it("mutation-count settling still wins when it happens first — the wall-clock timer firing afterward is a no-op", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const orchestrator = createAdOrchestrator({ client, renderer });
+
+      orchestrator.run(document);
+      await jest.advanceTimersByTimeAsync(0); // initial render
+
+      // 15 consecutive quiet mutation batches, comfortably more than the settle bound, well before
+      // the wall-clock threshold (mirrors the existing FR-008 test).
+      for (let i = 0; i < 15; i++) {
+        document.body.append(document.createElement("span"));
+        await jest.advanceTimersByTimeAsync(0);
+      }
+
+      // Already settled via the mutation-count path — a removal now produces no redisplay.
+      el.remove();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(renderer.renderAd).toHaveBeenCalledTimes(1);
+
+      // The wall-clock timer firing afterward must be a no-op: no error, no further change.
+      await jest.advanceTimersByTimeAsync(REDISPLAY_SETTLE_TIMEOUT_MS);
+      expect(renderer.renderAd).toHaveBeenCalledTimes(1);
+    });
+
+    it("genuine redisplay churn within the wall-clock window is unaffected — the timer never preempts a legitimate redisplay", async () => {
+      let current = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(current);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const orchestrator = createAdOrchestrator({ client, renderer });
+
+      orchestrator.run(document);
+      await jest.advanceTimersByTimeAsync(0); // initial render
+
+      // Two genuine redisplays, each landing shortly before the window would have elapsed since
+      // the *previous* render — each one restarts the timer, so it's never actually preempted.
+      for (let i = 0; i < 2; i++) {
+        await jest.advanceTimersByTimeAsync(REDISPLAY_SETTLE_TIMEOUT_MS - 1000);
+        const next = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+        current.replaceWith(next);
+        current = next;
+        await jest.advanceTimersByTimeAsync(0);
+      }
+
+      expect(client.requestAd).toHaveBeenCalledTimes(1); // still only one request
+      expect(renderer.renderAd).toHaveBeenCalledTimes(3); // initial + 2 redisplays, none swallowed
+    });
+
+    it("a slot resolved for good (redisplay budget exhausted) cancels its pending wall-clock timer", async () => {
+      let current = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(current);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const orchestrator = createAdOrchestrator({ client, renderer });
+
+      orchestrator.run(document);
+      await jest.advanceTimersByTimeAsync(0); // initial render (attempt 1)
+
+      // Exhaust the redisplay budget via genuine removals, well before the wall-clock threshold
+      // (mirrors the existing FR-010 test).
+      for (let i = 0; i < 10; i++) {
+        const next = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+        current.replaceWith(next);
+        current = next;
+        await jest.advanceTimersByTimeAsync(0);
+      }
+
+      const rendersAfterExhaustion = (renderer.renderAd as jest.Mock).mock.calls.length;
+
+      // Advance past where the (already-cleared) wall-clock timer would otherwise have fired —
+      // no error, no double-processing of the already-resolved slot.
+      await jest.advanceTimersByTimeAsync(REDISPLAY_SETTLE_TIMEOUT_MS);
+      expect(renderer.renderAd).toHaveBeenCalledTimes(rendersAfterExhaustion);
+    });
+
+    it("independent per-slot wall-clock timers — a quiet slot settles via timeout while a churning slot's timer keeps restarting", async () => {
+      const quietSlot = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      let churningCurrent = createSlotElement({ "data-platform-id": "p2", "data-ad-type-id": "leaderboard" });
+      document.body.innerHTML = "";
+      document.body.append(quietSlot, churningCurrent);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const orchestrator = createAdOrchestrator({ client, renderer });
+
+      orchestrator.run(document);
+      await jest.advanceTimersByTimeAsync(0); // both initial renders
+      expect(renderer.renderAd).toHaveBeenCalledTimes(2);
+
+      // Just before the quiet slot's threshold, genuinely redisplay ONLY the churning slot —
+      // restarting its own timer, while the quiet slot's own countdown continues untouched.
+      await jest.advanceTimersByTimeAsync(REDISPLAY_SETTLE_TIMEOUT_MS - 1000);
+      const nextChurning = createSlotElement({ "data-platform-id": "p2", "data-ad-type-id": "leaderboard" });
+      churningCurrent.replaceWith(nextChurning);
+      churningCurrent = nextChurning;
+      await jest.advanceTimersByTimeAsync(0);
+      expect(renderer.renderAd).toHaveBeenCalledTimes(3); // churning slot's redisplay
+
+      // Cross the quiet slot's own threshold (measured from its untouched initial render).
+      await jest.advanceTimersByTimeAsync(1000);
+
+      // Quiet slot has now settled via the wall-clock fallback — removing it produces no redisplay.
+      quietSlot.remove();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(renderer.renderAd).toHaveBeenCalledTimes(3);
+
+      // Churning slot's timer was restarted only 1000ms ago by its own redisplay — still well
+      // within its own window — so a genuine removal-and-reinsertion still redisplays it normally.
+      const finalReplacement = createSlotElement({ "data-platform-id": "p2", "data-ad-type-id": "leaderboard" });
+      churningCurrent.replaceWith(finalReplacement);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(renderer.renderAd).toHaveBeenCalledTimes(4);
     });
   });
 });

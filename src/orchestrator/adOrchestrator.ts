@@ -85,6 +85,17 @@ function makeGroupKey(config: AdDecisionRequest): string {
 const INITIAL_REDISPLAYS_REMAINING = 3;
 const INITIAL_QUIET_BATCHES_REMAINING = 10;
 
+// Caught in review (ad-serve-client#9): quietBatchesRemaining above only ever decrements when a
+// mutation batch actually fires. A page that mutates once (the initial render itself) and never
+// again leaves it permanently one batch short of settling, so a slot's redisplay tracking — and
+// the top-level MutationObserver/trackedSlots array this file retains until every slot settles —
+// never releases, for the rest of the page's life. This wall-clock fallback (feature 006) bounds
+// that: past this point since a slot's most recent (re)display, its redisplay tracking settles
+// anyway, the same outcome the quiet-batch path already produces. Sized like
+// viewabilityDetector.ts's MAX_WATCH_DURATION_MS (feature/#8), the established precedent for this
+// exact style of "bound a watch that might otherwise never conclude" fix in this codebase.
+export const REDISPLAY_SETTLE_TIMEOUT_MS = 2 * 60 * 1000;
+
 interface TrackedSlot {
   config: AdDecisionRequest;
   groupKey: string;
@@ -113,6 +124,12 @@ interface TrackedSlot {
   // duplicate viewable-impression events. Checked at the top of startViewabilityWatch so a
   // redisplay after reporting doesn't even start a new IntersectionObserver.
   viewableImpressionReported: boolean;
+  // The pending wall-clock settle timer (feature 006), or null when none is pending — never
+  // started, already fired, or already cleared. The same invariant discipline as
+  // stopViewabilityWatch above: every place that ends a slot's tracked-for-redisplay lifetime
+  // (resolveSlot, settleRedisplayTracking) MUST clear this too, and every (re)display MUST
+  // restart it (see scheduleSettleTimer below).
+  settleTimer: ReturnType<typeof setTimeout> | null;
 }
 
 interface GroupedSlotElement {
@@ -161,6 +178,20 @@ function mapSlotsByGroupPosition(root: ParentNode): Map<string, Element> {
 }
 
 export function createAdOrchestrator({ client, renderer, viewabilityDetector, trackingClient }: AdOrchestratorDeps) {
+  // Set once per run() call, to that call's own disconnectIfAllResolved (feature 006) — resolveSlot
+  // and settleRedisplayTracking live in this outer scope, while disconnectIfAllResolved is private
+  // to run()'s closure, so without this neither could ever prompt the top-level "is everything
+  // done" check to re-run. That check is otherwise only invoked from specific call sites (end of
+  // processMutationBatch, and runSlot(...).finally(...)) — never automatically just because a slot
+  // becomes resolved. Caught in review while planning feature 006: without this, a slot settled by
+  // the new wall-clock fallback on an otherwise-quiet page would mark itself resolved internally
+  // but never actually release the top-level MutationObserver/trackedSlots array — the exact
+  // resource this feature exists to bound. Assumes run() is called at most once per orchestrator
+  // instance (matches index.ts's actual usage); a future caller invoking run() more than once with
+  // overlapping in-flight slots would need this reworked, since this reference only ever points at
+  // the most recently started run() call.
+  let notifySlotSettled: (() => void) | null = null;
+
   // Marks a slot resolved and stops any viewability watch still pending for it — used only where
   // the rendered instance is genuinely gone for good (never rendered, a decision failure, or
   // removed with no redisplay budget left to bring it back) and so could never become viewable
@@ -169,6 +200,11 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
     slot.resolved = true;
     slot.stopViewabilityWatch?.();
     slot.stopViewabilityWatch = null;
+    if (slot.settleTimer !== null) {
+      clearTimeout(slot.settleTimer);
+      slot.settleTimer = null;
+    }
+    notifySlotSettled?.();
   }
 
   // Stops only the redisplay/mutation-tracking bookkeeping for a slot whose rendered element is
@@ -185,6 +221,36 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
   // this function) ends eligibility.
   function settleRedisplayTracking(slot: TrackedSlot): void {
     slot.resolved = true;
+    if (slot.settleTimer !== null) {
+      clearTimeout(slot.settleTimer);
+      slot.settleTimer = null;
+    }
+    notifySlotSettled?.();
+  }
+
+  // Restarts slot's wall-clock settle fallback (feature 006) — called every time it's (re)rendered,
+  // the same two moments quietBatchesRemaining is reset. If REDISPLAY_SETTLE_TIMEOUT_MS elapses
+  // with no mutation batch having settled or resolved the slot first, settles it via the exact same
+  // settleRedisplayTracking() the quiet-batch path already uses, producing an identical outcome
+  // (viewability watch untouched). No-ops if the slot got there some other way first, or if its
+  // rendered element is no longer connected (a disconnect-triggered mutation batch is either
+  // already handling this slot or about to).
+  function scheduleSettleTimer(slot: TrackedSlot): void {
+    if (slot.settleTimer !== null) {
+      clearTimeout(slot.settleTimer);
+    }
+    slot.settleTimer = setTimeout(() => {
+      try {
+        slot.settleTimer = null;
+        if (slot.resolved || !slot.renderedElement || !slot.renderedElement.isConnected) {
+          return;
+        }
+        settleRedisplayTracking(slot);
+      } catch {
+        // Runs on a schedule this SDK doesn't control the timing of — must never propagate to the
+        // host page (Constitution Principle V), matching every other timer callback in this file.
+      }
+    }, REDISPLAY_SETTLE_TIMEOUT_MS);
   }
 
   // Starts a fresh viewability watch for a just-rendered instance of `slot`, reporting via
@@ -264,6 +330,7 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
       });
       slot.renderedElement = slot.currentElement;
       startViewabilityWatch(slot, slot.currentElement);
+      scheduleSettleTimer(slot);
       // Deliberately not resolved yet: the render may itself be undone
       // shortly afterward by the host page's own redraw (e.g. a hydration
       // mismatch discarding the subtree it landed in) — the mutation
@@ -292,6 +359,7 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
         quietBatchesRemaining: INITIAL_QUIET_BATCHES_REMAINING,
         stopViewabilityWatch: null,
         viewableImpressionReported: false,
+        settleTimer: null,
       });
     }
 
@@ -304,6 +372,10 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
         observer.disconnect();
       }
     }
+
+    // See notifySlotSettled's declaration above (feature 006): resolveSlot/settleRedisplayTracking
+    // are defined outside this closure and otherwise have no way to prompt this exact check.
+    notifySlotSettled = disconnectIfAllResolved;
 
     function processMutationBatch(): void {
       try {
@@ -368,6 +440,7 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
           // watch, not a continuation of whatever the pre-redisplay one was doing (FR-003,
           // spec Acceptance Scenario 4).
           startViewabilityWatch(slot, current);
+          scheduleSettleTimer(slot);
         }
       } catch {
         // A defect here must never escape into the host page's own
