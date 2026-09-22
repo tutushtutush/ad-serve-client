@@ -3,6 +3,7 @@ import { createViewableImpressionClient } from "./client/viewableImpressionClien
 import { createAdOrchestrator } from "./orchestrator/adOrchestrator";
 import { createAdRenderer } from "./renderer/adRenderer";
 import { createViewabilityDetector } from "./utils/viewabilityDetector";
+import { getOrCreateSessionId } from "./utils/sessionId";
 
 declare global {
   interface Window {
@@ -44,7 +45,23 @@ function main(): void {
         typeof navigator.sendBeacon === "function" ? navigator.sendBeacon.bind(navigator) : undefined,
         window.fetch.bind(window),
       );
-      const orchestrator = createAdOrchestrator({ client, renderer, viewabilityDetector, trackingClient });
+      // Feature 008: originated once per page load, read back on a later page load in the same
+      // browsing session via sessionStorage (research.md Decisions 1-3) — undefined when storage
+      // or crypto.randomUUID is unavailable, which every downstream call site already treats as
+      // "omit this field" (Fail-Silent, Constitution Principle V).
+      const sessionId = getOrCreateSessionId(
+        window.sessionStorage,
+        typeof window.crypto?.randomUUID === "function"
+          ? window.crypto.randomUUID.bind(window.crypto)
+          : undefined,
+      );
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector,
+        trackingClient,
+        sessionId,
+      });
 
       orchestrator.run(document);
     } catch {

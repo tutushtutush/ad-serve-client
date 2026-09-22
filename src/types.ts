@@ -13,6 +13,10 @@ export interface AdDecisionRequest {
   adTypeId: string;
   country?: string;
   deviceType?: string;
+  // This SDK's own originated visitor session identifier (feature 008) — not parsed from a slot's
+  // data-* attributes like the other fields here; the Orchestrator supplies it uniformly for
+  // every request, not AdSlotConfig/parseSlotConfig. See adOrchestrator.ts.
+  sessionId?: string;
 }
 
 // Passed through opaquely from ad-serve-api's own store (see that repo's

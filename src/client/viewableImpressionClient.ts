@@ -7,6 +7,9 @@ export interface ViewableImpressionReport {
   // ad-serve-api's per-serving dedup key (feature 014/007) — optional, same treatment as every
   // other field here: absent just means no dedup key is sent, never blocks the report.
   impressionId?: string;
+  // This SDK's own originated visitor session identifier (feature 008) — same optional,
+  // degrade-silently treatment as impressionId above.
+  sessionId?: string;
 }
 
 export type SendBeaconLike = (url: string) => boolean;
@@ -45,6 +48,7 @@ export function createViewableImpressionClient(
         adTypeId: report.adTypeId,
         adConfigId: report.adConfigId,
         impressionId: report.impressionId,
+        sessionId: report.sessionId,
       });
 
       if (sendBeaconImpl && sendBeaconImpl(url)) {

@@ -21,6 +21,9 @@ function buildQueryString(request: AdDecisionRequest): string {
   if (request.deviceType) {
     params.set("deviceType", request.deviceType);
   }
+  if (request.sessionId) {
+    params.set("sessionId", request.sessionId);
+  }
   return params.toString();
 }
 

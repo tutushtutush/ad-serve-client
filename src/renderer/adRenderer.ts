@@ -76,6 +76,7 @@ function resolveClickHref(
   impressionId: unknown,
   placement: PlacementIdentity,
   apiBaseUrl: string,
+  sessionId: string | undefined,
 ): string | null {
   if (safeHref === null) {
     return null;
@@ -93,6 +94,10 @@ function resolveClickHref(
     adTypeId: placement.adTypeId,
     adConfigId: safeAdConfigId,
     impressionId: safeImpressionId || undefined,
+    // sessionId (feature 008) is this SDK's own already-trusted, already-string value (originated
+    // by getOrCreateSessionId, never sourced from an untrusted response) — no asSafeString
+    // coercion needed, unlike impressionId/adConfigId above.
+    sessionId,
   });
 }
 
@@ -107,7 +112,12 @@ function buildPlaceholderIcon(size: number): string {
   </svg>`;
 }
 
-function buildCreativeMarkup(ad: AdCandidate, apiBaseUrl: string, placement: PlacementIdentity): string {
+function buildCreativeMarkup(
+  ad: AdCandidate,
+  apiBaseUrl: string,
+  placement: PlacementIdentity,
+  sessionId: string | undefined,
+): string {
   const r: ResolvedAdCreativeRender =
     typeof ad.resolvedRender === "object" && ad.resolvedRender !== null ? ad.resolvedRender : {};
 
@@ -159,7 +169,14 @@ function buildCreativeMarkup(ad: AdCandidate, apiBaseUrl: string, placement: Pla
   // resolveClickHref only ever changes *where* an already-clickable ad points, routing through
   // ad-serve-api's click endpoint when possible and falling back to safeHref itself otherwise
   // (feature 004, FR-003).
-  const clickHref = resolveClickHref(safeHref, ad.adConfigId, ad.impressionId, placement, apiBaseUrl);
+  const clickHref = resolveClickHref(
+    safeHref,
+    ad.adConfigId,
+    ad.impressionId,
+    placement,
+    apiBaseUrl,
+    sessionId,
+  );
   // tag and attrs are derived together, not via separate parallel ternaries
   // on the same condition, so they can never diverge into a mismatched
   // open/close tag pair (code review round 2). The non-interactive case uses
@@ -199,7 +216,12 @@ function buildCreativeMarkup(ad: AdCandidate, apiBaseUrl: string, placement: Pla
 }
 
 export function createAdRenderer(documentImpl: Document, apiBaseUrl: string) {
-  function renderAd(slotElement: Element, ad: AdCandidate, placement: PlacementIdentity): void {
+  function renderAd(
+    slotElement: Element,
+    ad: AdCandidate,
+    placement: PlacementIdentity,
+    sessionId?: string,
+  ): void {
     const iframe = documentImpl.createElement("iframe");
     // Narrowest sandbox that satisfies a static text/image/link creative
     // (research.md): no allow-scripts, no allow-same-origin.
@@ -213,7 +235,7 @@ export function createAdRenderer(documentImpl: Document, apiBaseUrl: string) {
     iframe.setAttribute("height", String(ad.height));
     iframe.setAttribute("frameborder", "0");
     iframe.setAttribute("scrolling", "no");
-    iframe.setAttribute("srcdoc", buildCreativeMarkup(ad, apiBaseUrl, placement));
+    iframe.setAttribute("srcdoc", buildCreativeMarkup(ad, apiBaseUrl, placement, sessionId));
     slotElement.appendChild(iframe);
   }
 

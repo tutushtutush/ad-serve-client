@@ -21,7 +21,7 @@ export interface AdDecisionClientLike {
 }
 
 export interface AdRendererLike {
-  renderAd(slotElement: Element, ad: AdCandidate, placement: PlacementIdentity): void;
+  renderAd(slotElement: Element, ad: AdCandidate, placement: PlacementIdentity, sessionId?: string): void;
 }
 
 export interface ViewableImpressionClientLike {
@@ -37,6 +37,14 @@ export interface AdOrchestratorDeps {
   // (index.ts) always supplies both.
   viewabilityDetector?: ViewabilityDetectorLike;
   trackingClient?: ViewableImpressionClientLike;
+  // This SDK's own originated visitor session identifier (feature 008) — read once by index.ts
+  // via getOrCreateSessionId() and handed here as a single, already-resolved value, not obtained
+  // by this module itself (research.md Decision 1). Forwarded, unmodified, into every
+  // requestAd/reportViewableImpression/renderAd call this run makes, so every request on one page
+  // load shares the identical value (spec.md US2). Absent (undefined) when origination failed for
+  // any reason — every call site already treats an absent optional field as "omit it," so no
+  // special-casing is needed here beyond simply passing the value through.
+  sessionId?: string;
 }
 
 const SLOT_SELECTOR = "[data-ad-serve-slot]";
@@ -178,7 +186,13 @@ function mapSlotsByGroupPosition(root: ParentNode): Map<string, Element> {
   return byPosition;
 }
 
-export function createAdOrchestrator({ client, renderer, viewabilityDetector, trackingClient }: AdOrchestratorDeps) {
+export function createAdOrchestrator({
+  client,
+  renderer,
+  viewabilityDetector,
+  trackingClient,
+  sessionId,
+}: AdOrchestratorDeps) {
   // Set once per run() call, to that call's own disconnectIfAllResolved (feature 006) — resolveSlot
   // and settleRedisplayTracking live in this outer scope, while disconnectIfAllResolved is private
   // to run()'s closure, so without this neither could ever prompt the top-level "is everything
@@ -317,6 +331,7 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
           adTypeId: slot.config.adTypeId,
           adConfigId,
           impressionId,
+          sessionId,
         });
       } catch {
         // See comment above.
@@ -332,7 +347,7 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
 
   async function runSlot(slot: TrackedSlot): Promise<void> {
     try {
-      const result = await client.requestAd(slot.config);
+      const result = await client.requestAd({ ...slot.config, sessionId });
       if (result.status !== "filled") {
         resolveSlot(slot);
         return;
@@ -348,10 +363,12 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
       }
 
       slot.ad = result.ad;
-      renderer.renderAd(slot.currentElement, result.ad, {
-        platformId: slot.config.platformId,
-        adTypeId: slot.config.adTypeId,
-      });
+      renderer.renderAd(
+        slot.currentElement,
+        result.ad,
+        { platformId: slot.config.platformId, adTypeId: slot.config.adTypeId },
+        sessionId,
+      );
       slot.renderedElement = slot.currentElement;
       startViewabilityWatch(slot, slot.currentElement);
       scheduleSettleTimer(slot);
@@ -453,10 +470,12 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
 
           // Redisplay the same, already-fetched ad — never a second request
           // (research.md).
-          renderer.renderAd(current, slot.ad as AdCandidate, {
-            platformId: slot.config.platformId,
-            adTypeId: slot.config.adTypeId,
-          });
+          renderer.renderAd(
+            current,
+            slot.ad as AdCandidate,
+            { platformId: slot.config.platformId, adTypeId: slot.config.adTypeId },
+            sessionId,
+          );
           slot.renderedElement = current;
           slot.redisplaysRemaining -= 1;
           slot.quietBatchesRemaining = INITIAL_QUIET_BATCHES_REMAINING;
