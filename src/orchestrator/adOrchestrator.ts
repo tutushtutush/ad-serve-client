@@ -1,5 +1,6 @@
 import { asSafeString } from "../utils/asSafeString";
 import type { ViewabilityDetectorLike } from "../utils/viewabilityDetector";
+import type { ViewableImpressionReport } from "../client/viewableImpressionClient";
 import type {
   AdCandidate,
   AdDecisionRequest,
@@ -24,7 +25,7 @@ export interface AdRendererLike {
 }
 
 export interface ViewableImpressionClientLike {
-  reportViewableImpression(report: { platformId: string; adTypeId: string; adConfigId: string }): void;
+  reportViewableImpression(report: ViewableImpressionReport): void;
 }
 
 export interface AdOrchestratorDeps {
@@ -294,6 +295,13 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
       return;
     }
 
+    // Coerced the same way as adConfigId above (feature 007) — impressionId is equally opaque,
+    // upstream-sourced data that isAdCandidate() never validates the type of. Read at report time
+    // via slot.ad, so a redisplay (which reuses the same slot.ad, never re-requesting) reports the
+    // same impressionId as the original serving, never a freshly minted one (research.md
+    // Decision 3, spec Acceptance Scenario 4).
+    const impressionId = asSafeString(slot.ad?.impressionId) || undefined;
+
     slot.stopViewabilityWatch = viewabilityDetector.watch(element, () => {
       slot.stopViewabilityWatch = null;
       slot.viewableImpressionReported = true;
@@ -308,6 +316,7 @@ export function createAdOrchestrator({ client, renderer, viewabilityDetector, tr
           platformId: slot.config.platformId,
           adTypeId: slot.config.adTypeId,
           adConfigId,
+          impressionId,
         });
       } catch {
         // See comment above.

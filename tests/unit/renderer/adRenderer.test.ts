@@ -358,6 +358,67 @@ describe("createAdRenderer", () => {
     });
   });
 
+  describe("impression id echoed on click tracking (feature 007, US1)", () => {
+    it("includes impressionId as a query parameter when present on the ad", () => {
+      const ad = {
+        ...makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }),
+        adConfigId: "ad-1",
+        impressionId: "imp-1",
+      };
+
+      const markup = renderAndGetSrcdoc(ad, API_BASE_URL, PLACEMENT);
+
+      const hrefMatch = markup.match(/<a href="([^"]+)"/);
+      expect(hrefMatch).not.toBeNull();
+      const url = new URL(hrefMatch![1].replace(/&amp;/g, "&"));
+      expect(url.searchParams.get("impressionId")).toBe("imp-1");
+    });
+
+    it("omits impressionId from the click URL when absent, unchanged from before this feature", () => {
+      const ad = {
+        ...makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }),
+        adConfigId: "ad-1",
+      };
+
+      const markup = renderAndGetSrcdoc(ad, API_BASE_URL, PLACEMENT);
+
+      const hrefMatch = markup.match(/<a href="([^"]+)"/);
+      expect(hrefMatch).not.toBeNull();
+      const url = new URL(hrefMatch![1].replace(/&amp;/g, "&"));
+      expect(url.searchParams.has("impressionId")).toBe(false);
+    });
+
+    it("omits impressionId when wrong-typed (e.g. a number, from a malformed ad-serve-api response), never stringifying it into the URL", () => {
+      const ad = {
+        ...makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }),
+        adConfigId: "ad-1",
+        impressionId: 12345 as unknown as string,
+      };
+
+      const markup = renderAndGetSrcdoc(ad, API_BASE_URL, PLACEMENT);
+
+      const hrefMatch = markup.match(/<a href="([^"]+)"/);
+      expect(hrefMatch).not.toBeNull();
+      const url = new URL(hrefMatch![1].replace(/&amp;/g, "&"));
+      expect(url.searchParams.has("impressionId")).toBe(false);
+      expect(markup).not.toContain("object+Object");
+    });
+  });
+
+  describe("impression id never gates click tracking itself (feature 007, US3)", () => {
+    it("still falls back to the direct advertiser link when adConfigId is absent, even with impressionId present", () => {
+      const ad = {
+        ...makeAdWithResolvedRender({ isLinked: true, linkUrl: "https://example.com/sale" }),
+        impressionId: "imp-1",
+      };
+
+      const markup = renderAndGetSrcdoc(ad, API_BASE_URL, PLACEMENT);
+
+      expect(markup).toContain('<a href="https://example.com/sale"');
+      expect(markup).not.toContain("/click?");
+    });
+  });
+
   describe("click tracking never affects clickability itself (feature 004, FR-004)", () => {
     it("stays non-interactive when isLinked is false, even with adConfigId and apiBaseUrl available", () => {
       const ad = { ...makeAdWithResolvedRender({ isLinked: false, linkUrl: "https://example.com/sale" }), adConfigId: "ad-1" };
