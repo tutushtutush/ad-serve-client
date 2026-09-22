@@ -36,6 +36,17 @@ describe("getOrCreateSessionId", () => {
       expect(randomUUIDImpl).not.toHaveBeenCalled();
       expect(storage.setItem).not.toHaveBeenCalled();
     });
+
+    it("reads back an already-persisted id even when randomUUIDImpl is unavailable this call (code review)", () => {
+      const storage = createFakeStorage({
+        getItem: jest.fn().mockReturnValue("22222222-2222-2222-2222-222222222222"),
+      });
+
+      const result = getOrCreateSessionId(storage, undefined);
+
+      expect(result).toBe("22222222-2222-2222-2222-222222222222");
+      expect(storage.setItem).not.toHaveBeenCalled();
+    });
   });
 
   describe("US3 — Fail-Silent degradation", () => {
