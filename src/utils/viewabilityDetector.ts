@@ -56,7 +56,7 @@ export function createViewabilityDetector(
       }
       stopped = true;
       clearPendingTimer();
-      clearTimeout(maxDurationTimer);
+      clearTimeout(giveUpTimer);
       observer.disconnect();
     }
 
@@ -99,14 +99,31 @@ export function createViewabilityDetector(
     // if the threshold already fired or the caller already stopped the watch first. Wrapped in
     // try/catch for the same reason as every other timer callback in this file (Constitution
     // Principle V): this runs on a schedule this SDK doesn't control.
-    const maxDurationTimer = setTimeout(() => {
-      try {
-        stop();
-        onGiveUp?.();
-      } catch {
-        // See comment above.
-      }
-    }, MAX_WATCH_DURATION_MS);
+    //
+    // Caught in review of #8: a plain one-shot timer fired at exactly MAX_WATCH_DURATION_MS could
+    // preempt a dwell timer that's already in flight and about to legitimately satisfy the IAB
+    // threshold (e.g. the element crossed it at 119.3s, due to qualify at 120.3s) — discarding a
+    // genuine viewable impression. `timer !== null` means a dwell timer is pending, and it's
+    // always due within VIEWABILITY_DURATION_MS (the only place it's set); rescheduling the
+    // give-up check by that long, instead of giving up immediately, lets it resolve first — either
+    // it fires (stop() clears this timer, so the rescheduled check never runs) or it gets cleared
+    // by dropping back below threshold (so the next check finds timer === null and gives up then).
+    let giveUpTimer: ReturnType<typeof setTimeout>;
+    function scheduleGiveUpCheck(delay: number): void {
+      giveUpTimer = setTimeout(() => {
+        try {
+          if (timer !== null) {
+            scheduleGiveUpCheck(VIEWABILITY_DURATION_MS);
+            return;
+          }
+          stop();
+          onGiveUp?.();
+        } catch {
+          // See comment above.
+        }
+      }, delay);
+    }
+    scheduleGiveUpCheck(MAX_WATCH_DURATION_MS);
 
     return stop;
   }

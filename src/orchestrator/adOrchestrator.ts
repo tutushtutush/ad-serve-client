@@ -1,4 +1,5 @@
 import { asSafeString } from "../utils/asSafeString";
+import type { ViewabilityDetectorLike } from "../utils/viewabilityDetector";
 import type {
   AdCandidate,
   AdDecisionRequest,
@@ -7,16 +8,19 @@ import type {
   PlacementIdentity,
 } from "../types";
 
+// Re-exported so consumers of this module (index.ts, tests) don't need to know it actually lives
+// in viewabilityDetector.ts — caught in review of #8: this used to be redeclared here as its own,
+// independently-maintained interface structurally identical to the real one, which meant every
+// signature change (like onGiveUp) had to be hand-edited in both places with nothing catching a
+// future drift between them.
+export type { ViewabilityDetectorLike };
+
 export interface AdDecisionClientLike {
   requestAd(request: AdDecisionRequest): Promise<AdDecisionResult>;
 }
 
 export interface AdRendererLike {
   renderAd(slotElement: Element, ad: AdCandidate, placement: PlacementIdentity): void;
-}
-
-export interface ViewabilityDetectorLike {
-  watch(element: Element, onViewable: () => void, onGiveUp?: () => void): () => void;
 }
 
 export interface ViewableImpressionClientLike {

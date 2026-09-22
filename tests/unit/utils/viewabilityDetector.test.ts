@@ -264,6 +264,51 @@ describe("createViewabilityDetector", () => {
     expect(onGiveUp).not.toHaveBeenCalled();
   });
 
+  it("lets a dwell timer already in flight at the max-duration boundary complete instead of discarding it (caught in review of #8)", () => {
+    const detector = createViewabilityDetector(
+      FakeIntersectionObserver as unknown as typeof IntersectionObserver,
+    );
+    const onViewable = jest.fn();
+    const onGiveUp = jest.fn();
+
+    detector.watch(fakeElement(), onViewable, onGiveUp);
+    const observer = FakeIntersectionObserver.instances[0];
+
+    // Crosses the threshold 700ms before the cap — its dwell timer is due to fire 300ms *after*
+    // the cap, right in the danger window this fix targets.
+    jest.advanceTimersByTime(MAX_WATCH_DURATION_MS - 700);
+    observer.emit(true, 0.6);
+
+    jest.advanceTimersByTime(700); // now exactly at the cap, with the dwell timer still pending
+    expect(onGiveUp).not.toHaveBeenCalled();
+    expect(onViewable).not.toHaveBeenCalled();
+
+    jest.advanceTimersByTime(300); // dwell timer's own 1000ms completes
+    expect(onViewable).toHaveBeenCalledTimes(1);
+    expect(onGiveUp).not.toHaveBeenCalled();
+  });
+
+  it("still gives up if a dwell timer pending at the boundary gets cleared before it fires", () => {
+    const detector = createViewabilityDetector(
+      FakeIntersectionObserver as unknown as typeof IntersectionObserver,
+    );
+    const onViewable = jest.fn();
+    const onGiveUp = jest.fn();
+
+    detector.watch(fakeElement(), onViewable, onGiveUp);
+    const observer = FakeIntersectionObserver.instances[0];
+
+    jest.advanceTimersByTime(MAX_WATCH_DURATION_MS - 700);
+    observer.emit(true, 0.6);
+
+    jest.advanceTimersByTime(700); // at the cap, dwell timer still pending — give-up defers
+    observer.emit(false, 0.0); // drops below threshold before it can fire — dwell timer cleared
+
+    jest.advanceTimersByTime(1000); // the deferred re-check fires
+    expect(onGiveUp).toHaveBeenCalledTimes(1);
+    expect(onViewable).not.toHaveBeenCalled();
+  });
+
   describe("unsupported browser (FR-005)", () => {
     it("watch() returns a working no-op stop and never calls onViewable", () => {
       const detector = createViewabilityDetector(undefined);
