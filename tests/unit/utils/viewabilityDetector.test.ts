@@ -1,4 +1,4 @@
-import { createViewabilityDetector } from "../../../src/utils/viewabilityDetector";
+import { createViewabilityDetector, MAX_WATCH_DURATION_MS } from "../../../src/utils/viewabilityDetector";
 
 type ObserverCallback = (entries: Array<{ isIntersecting: boolean; intersectionRatio: number }>) => void;
 
@@ -181,6 +181,132 @@ describe("createViewabilityDetector", () => {
 
     observer.emit(true, 0.6);
     expect(() => jest.advanceTimersByTime(1000)).not.toThrow();
+  });
+
+  it("stops the observer and never calls onViewable if the IAB threshold is never reached within the max watch duration (ad-serve-client #7)", () => {
+    const detector = createViewabilityDetector(
+      FakeIntersectionObserver as unknown as typeof IntersectionObserver,
+    );
+    const onViewable = jest.fn();
+
+    detector.watch(fakeElement(), onViewable);
+    const observer = FakeIntersectionObserver.instances[0];
+
+    jest.advanceTimersByTime(MAX_WATCH_DURATION_MS);
+
+    expect(onViewable).not.toHaveBeenCalled();
+    expect(observer.disconnected).toBe(true);
+  });
+
+  it("does not stop early: the max watch duration timer is cleared once onViewable fires", () => {
+    const detector = createViewabilityDetector(
+      FakeIntersectionObserver as unknown as typeof IntersectionObserver,
+    );
+    const onViewable = jest.fn();
+
+    detector.watch(fakeElement(), onViewable);
+    const observer = FakeIntersectionObserver.instances[0];
+
+    observer.emit(true, 0.6);
+    jest.advanceTimersByTime(1000);
+    expect(onViewable).toHaveBeenCalledTimes(1);
+
+    // The max-duration timer firing afterward must not do anything further (no throw, no second
+    // disconnect side effect worth observing beyond what already happened).
+    expect(() => jest.advanceTimersByTime(MAX_WATCH_DURATION_MS)).not.toThrow();
+    expect(onViewable).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls onGiveUp, not onViewable, when the max watch duration elapses (caught in review of #8)", () => {
+    const detector = createViewabilityDetector(
+      FakeIntersectionObserver as unknown as typeof IntersectionObserver,
+    );
+    const onViewable = jest.fn();
+    const onGiveUp = jest.fn();
+
+    detector.watch(fakeElement(), onViewable, onGiveUp);
+
+    jest.advanceTimersByTime(MAX_WATCH_DURATION_MS);
+
+    expect(onGiveUp).toHaveBeenCalledTimes(1);
+    expect(onViewable).not.toHaveBeenCalled();
+  });
+
+  it("never calls onGiveUp once onViewable has already fired", () => {
+    const detector = createViewabilityDetector(
+      FakeIntersectionObserver as unknown as typeof IntersectionObserver,
+    );
+    const onViewable = jest.fn();
+    const onGiveUp = jest.fn();
+
+    detector.watch(fakeElement(), onViewable, onGiveUp);
+    const observer = FakeIntersectionObserver.instances[0];
+
+    observer.emit(true, 0.6);
+    jest.advanceTimersByTime(1000);
+    expect(onViewable).toHaveBeenCalledTimes(1);
+
+    jest.advanceTimersByTime(MAX_WATCH_DURATION_MS);
+    expect(onGiveUp).not.toHaveBeenCalled();
+  });
+
+  it("never calls onGiveUp once stop() has already been called externally", () => {
+    const detector = createViewabilityDetector(
+      FakeIntersectionObserver as unknown as typeof IntersectionObserver,
+    );
+    const onViewable = jest.fn();
+    const onGiveUp = jest.fn();
+
+    const stop = detector.watch(fakeElement(), onViewable, onGiveUp);
+    stop();
+
+    jest.advanceTimersByTime(MAX_WATCH_DURATION_MS);
+    expect(onGiveUp).not.toHaveBeenCalled();
+  });
+
+  it("lets a dwell timer already in flight at the max-duration boundary complete instead of discarding it (caught in review of #8)", () => {
+    const detector = createViewabilityDetector(
+      FakeIntersectionObserver as unknown as typeof IntersectionObserver,
+    );
+    const onViewable = jest.fn();
+    const onGiveUp = jest.fn();
+
+    detector.watch(fakeElement(), onViewable, onGiveUp);
+    const observer = FakeIntersectionObserver.instances[0];
+
+    // Crosses the threshold 700ms before the cap — its dwell timer is due to fire 300ms *after*
+    // the cap, right in the danger window this fix targets.
+    jest.advanceTimersByTime(MAX_WATCH_DURATION_MS - 700);
+    observer.emit(true, 0.6);
+
+    jest.advanceTimersByTime(700); // now exactly at the cap, with the dwell timer still pending
+    expect(onGiveUp).not.toHaveBeenCalled();
+    expect(onViewable).not.toHaveBeenCalled();
+
+    jest.advanceTimersByTime(300); // dwell timer's own 1000ms completes
+    expect(onViewable).toHaveBeenCalledTimes(1);
+    expect(onGiveUp).not.toHaveBeenCalled();
+  });
+
+  it("still gives up if a dwell timer pending at the boundary gets cleared before it fires", () => {
+    const detector = createViewabilityDetector(
+      FakeIntersectionObserver as unknown as typeof IntersectionObserver,
+    );
+    const onViewable = jest.fn();
+    const onGiveUp = jest.fn();
+
+    detector.watch(fakeElement(), onViewable, onGiveUp);
+    const observer = FakeIntersectionObserver.instances[0];
+
+    jest.advanceTimersByTime(MAX_WATCH_DURATION_MS - 700);
+    observer.emit(true, 0.6);
+
+    jest.advanceTimersByTime(700); // at the cap, dwell timer still pending — give-up defers
+    observer.emit(false, 0.0); // drops below threshold before it can fire — dwell timer cleared
+
+    jest.advanceTimersByTime(1000); // the deferred re-check fires
+    expect(onGiveUp).toHaveBeenCalledTimes(1);
+    expect(onViewable).not.toHaveBeenCalled();
   });
 
   describe("unsupported browser (FR-005)", () => {

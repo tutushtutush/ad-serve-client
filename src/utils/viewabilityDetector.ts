@@ -3,11 +3,27 @@
 const VIEWABILITY_THRESHOLD = 0.5;
 const VIEWABILITY_DURATION_MS = 1000;
 
+// Caught in review (eventpulse #58 / ad-serve-client #7): a slot's viewability watch is
+// deliberately kept running for as long as its rendered element stays connected, even after
+// redisplay-tracking itself has settled (adOrchestrator.ts's settleRedisplayTracking) — a below-
+// fold ad must stay eligible to be reported whenever the viewer eventually scrolls to it (SC-002).
+// But with no upper bound, an ad that's never scrolled into view keeps its IntersectionObserver
+// (and the closure capturing the full ad creative, including base64 image fields) alive for the
+// entire page lifetime. This wall-clock cap bounds that: past this point the watch gives up and
+// releases its resources, the same "no report" outcome as if viewability were simply never
+// reached, rather than the watch itself becoming an unbounded leak.
+export const MAX_WATCH_DURATION_MS = 2 * 60 * 1000;
+
 export interface ViewabilityDetectorLike {
   // Starts watching `element`. Calls `onViewable` at most once, the first time the IAB
   // viewability condition is satisfied. Returns a `stop()` function that cancels the watch —
   // safe to call at any time, including after `onViewable` has already fired (a no-op then).
-  watch(element: Element, onViewable: () => void): () => void;
+  // `onGiveUp`, if supplied, is called at most once instead of `onViewable` if
+  // MAX_WATCH_DURATION_MS elapses with the threshold never reached — the caller's signal that
+  // this watch's `stop()` reference is now stale/inert (see adOrchestrator.ts's
+  // stopViewabilityWatch field), since internally self-stopping this way is otherwise
+  // indistinguishable from still being active.
+  watch(element: Element, onViewable: () => void, onGiveUp?: () => void): () => void;
 }
 
 /**
@@ -19,7 +35,7 @@ export interface ViewabilityDetectorLike {
 export function createViewabilityDetector(
   IntersectionObserverImpl: typeof IntersectionObserver | undefined,
 ): ViewabilityDetectorLike {
-  function watch(element: Element, onViewable: () => void): () => void {
+  function watch(element: Element, onViewable: () => void, onGiveUp?: () => void): () => void {
     if (!IntersectionObserverImpl) {
       return () => {};
     }
@@ -40,6 +56,7 @@ export function createViewabilityDetector(
       }
       stopped = true;
       clearPendingTimer();
+      clearTimeout(giveUpTimer);
       observer.disconnect();
     }
 
@@ -76,6 +93,38 @@ export function createViewabilityDetector(
     );
 
     observer.observe(element);
+
+    // Bounds the watch's lifetime regardless of whether the IAB threshold is ever reached — see
+    // MAX_WATCH_DURATION_MS above. stop() itself clears this timer too, making this a plain no-op
+    // if the threshold already fired or the caller already stopped the watch first. Wrapped in
+    // try/catch for the same reason as every other timer callback in this file (Constitution
+    // Principle V): this runs on a schedule this SDK doesn't control.
+    //
+    // Caught in review of #8: a plain one-shot timer fired at exactly MAX_WATCH_DURATION_MS could
+    // preempt a dwell timer that's already in flight and about to legitimately satisfy the IAB
+    // threshold (e.g. the element crossed it at 119.3s, due to qualify at 120.3s) — discarding a
+    // genuine viewable impression. `timer !== null` means a dwell timer is pending, and it's
+    // always due within VIEWABILITY_DURATION_MS (the only place it's set); rescheduling the
+    // give-up check by that long, instead of giving up immediately, lets it resolve first — either
+    // it fires (stop() clears this timer, so the rescheduled check never runs) or it gets cleared
+    // by dropping back below threshold (so the next check finds timer === null and gives up then).
+    let giveUpTimer: ReturnType<typeof setTimeout>;
+    function scheduleGiveUpCheck(delay: number): void {
+      giveUpTimer = setTimeout(() => {
+        try {
+          if (timer !== null) {
+            scheduleGiveUpCheck(VIEWABILITY_DURATION_MS);
+            return;
+          }
+          stop();
+          onGiveUp?.();
+        } catch {
+          // See comment above.
+        }
+      }, delay);
+    }
+    scheduleGiveUpCheck(MAX_WATCH_DURATION_MS);
+
     return stop;
   }
 

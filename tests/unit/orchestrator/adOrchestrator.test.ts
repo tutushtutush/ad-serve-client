@@ -525,11 +525,16 @@ describe("createAdOrchestrator.run", () => {
   const adWithConfig = { ...makeAd(), adConfigId: "config-1" };
 
   function createFakeViewabilityDetector() {
-    const watchCalls: Array<{ element: Element; onViewable: () => void; stop: jest.Mock }> = [];
+    const watchCalls: Array<{
+      element: Element;
+      onViewable: () => void;
+      onGiveUp?: () => void;
+      stop: jest.Mock;
+    }> = [];
     const detector: ViewabilityDetectorLike = {
-      watch: jest.fn((element: Element, onViewable: () => void) => {
+      watch: jest.fn((element: Element, onViewable: () => void, onGiveUp?: () => void) => {
         const stop = jest.fn();
-        watchCalls.push({ element, onViewable, stop });
+        watchCalls.push({ element, onViewable, onGiveUp, stop });
         return stop;
       }),
     };
@@ -777,6 +782,78 @@ describe("createAdOrchestrator.run", () => {
 
       const lastWatch = watchCalls[watchCalls.length - 1];
       expect(lastWatch.stop).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not report a duplicate viewable impression across redisplays once already reported (ad-serve-client #7)", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: adWithConfig })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const { detector, watchCalls } = createFakeViewabilityDetector();
+      const trackingClient = createFakeTrackingClient();
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector: detector,
+        trackingClient,
+      });
+
+      orchestrator.run(document);
+      await flushMicrotasks(); // initial render
+      expect(watchCalls).toHaveLength(1);
+
+      // Reported once, before any redisplay.
+      watchCalls[0].onViewable();
+      expect(trackingClient.reportViewableImpression).toHaveBeenCalledTimes(1);
+
+      // A redisplay after the report must not start a new watch at all — nothing left to report.
+      const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      el.replaceWith(replacement);
+      await flushMicrotasks();
+
+      expect(renderer.renderAd).toHaveBeenCalledTimes(2); // still redisplays the ad itself
+      expect(watchCalls).toHaveLength(1); // but no second watch
+      expect(trackingClient.reportViewableImpression).toHaveBeenCalledTimes(1); // no duplicate report
+    });
+
+    it("clears stopViewabilityWatch once the watch gives up on its own, so a later redisplay never re-invokes its stale stop() (caught in review of #8)", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: adWithConfig })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const { detector, watchCalls } = createFakeViewabilityDetector();
+      const trackingClient = createFakeTrackingClient();
+      const orchestrator = createAdOrchestrator({
+        client,
+        renderer,
+        viewabilityDetector: detector,
+        trackingClient,
+      });
+
+      orchestrator.run(document);
+      await flushMicrotasks(); // initial render
+      expect(watchCalls).toHaveLength(1);
+
+      // Simulate viewabilityDetector.ts's internal max-watch-duration timer giving up.
+      watchCalls[0].onGiveUp?.();
+      expect(watchCalls[0].stop).not.toHaveBeenCalled(); // give-up already self-stopped internally
+
+      // A redisplay afterward starts an independent new watch, same as any other redisplay —
+      // and must not call the first watch's now-stale stop() again.
+      const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      el.replaceWith(replacement);
+      await flushMicrotasks();
+
+      expect(watchCalls).toHaveLength(2);
+      expect(watchCalls[0].stop).not.toHaveBeenCalled();
     });
 
     it("a throwing trackingClient.reportViewableImpression does not propagate", async () => {
