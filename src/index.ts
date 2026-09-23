@@ -104,7 +104,11 @@ function main(): void {
 
       // Drain whatever a host page already queued before this SDK finished starting up — each
       // entry invoked as a zero-argument callback, individually wrapped so one throwing callback
-      // doesn't stop the rest from running (FR-004/FR-009).
+      // doesn't stop the rest from running (FR-004/FR-009). Cleared afterward (caught in code
+      // review): if this bundle's script tag is ever accidentally included twice on the same page,
+      // an un-cleared queue would replay every already-handled callback against the *second*
+      // bootstrap's brand-new orchestrator — which has no memory of what the first one already
+      // claimed — producing duplicate requests for slots that are already filled.
       const queue = adServe.q;
       for (const queued of queue) {
         try {
@@ -113,11 +117,17 @@ function main(): void {
           // See above.
         }
       }
+      queue.length = 0;
 
       // Any callback pushed after this point runs immediately instead of merely being appended —
       // the same command-queue technique Google Publisher Tag/Prebid.js use (Constitution's
-      // Technology & Architecture Constraints).
+      // Technology & Architecture Constraints). Delegates to the real Array.prototype.push (not
+      // recursively to this override) so the return value still honors push's normal contract —
+      // the array's length immediately after appending, before this queue is drained back to empty
+      // below (caught in code review: an earlier version returned queue.length without ever
+      // actually appending, so it always reported a stale, unchanged length).
       queue.push = (...cmds: Array<() => void>): number => {
+        const newLength = Array.prototype.push.apply(queue, cmds);
         for (const cmd of cmds) {
           try {
             cmd();
@@ -125,7 +135,8 @@ function main(): void {
             // See above.
           }
         }
-        return queue.length;
+        queue.length = 0;
+        return newLength;
       };
     } catch {
       // A setup failure must never break the host page (Constitution
