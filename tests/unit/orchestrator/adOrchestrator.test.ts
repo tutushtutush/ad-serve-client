@@ -350,13 +350,22 @@ describe("createAdOrchestrator.run", () => {
         throw new Error("boom");
       });
 
-    document.body.append(document.createElement("div")); // triggers a remap attempt that throws
+    // A remap is only actually attempted once this slot's own element is gone (feature 009 fix) —
+    // removing it (rather than an unrelated mutation elsewhere) is what triggers the lookup that
+    // hits the mocked throw.
+    el.remove();
     await flushMicrotasks();
 
+    // Guards against this test silently becoming vacuous (the mocked throw never actually
+    // consumed) if a future change makes remapping lazier still. Not toHaveBeenCalledTimes(1): in
+    // the full suite, other tests' still-hung MutationObservers on this same shared jsdom
+    // `document` (e.g. a slot whose requestAd deliberately never resolves) can add further,
+    // unrelated calls of their own.
+    expect(querySpy).toHaveBeenCalled();
     querySpy.mockRestore();
 
     const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
-    el.replaceWith(replacement); // a later, unaffected mutation
+    document.body.append(replacement); // a later, unaffected mutation supplies the replacement
     await flushMicrotasks();
 
     resolve({ status: "filled", ad });
@@ -1282,6 +1291,224 @@ describe("createAdOrchestrator.run", () => {
       churningCurrent.replaceWith(finalReplacement);
       await jest.advanceTimersByTimeAsync(0);
       expect(renderer.renderAd).toHaveBeenCalledTimes(4);
+    });
+  });
+
+  // --- 009-support-infinite-scroll ---
+
+  describe("re-discovery across multiple run() calls (feature 009)", () => {
+    it("fills a genuinely new slot inserted after the first run() call, on a later run() call (US1)", async () => {
+      const first = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(first);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const orchestrator = createAdOrchestrator({ client, renderer });
+
+      orchestrator.run(document);
+      await flushMicrotasks();
+      expect(client.requestAd).toHaveBeenCalledTimes(1);
+
+      const second = createSlotElement({ "data-platform-id": "p2", "data-ad-type-id": "leaderboard" });
+      document.body.append(second);
+
+      orchestrator.run(document);
+      await flushMicrotasks();
+
+      expect(client.requestAd).toHaveBeenCalledTimes(2);
+      expect(renderer.renderAd).toHaveBeenCalledTimes(2);
+      const secondCall = (renderer.renderAd as jest.Mock).mock.calls[1];
+      expect(secondCall[0]).toBe(second);
+    });
+
+    it("a later run() call over already-handled content never re-requests or re-renders an already-claimed slot (US3)", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const orchestrator = createAdOrchestrator({ client, renderer });
+
+      orchestrator.run(document);
+      await flushMicrotasks();
+      expect(client.requestAd).toHaveBeenCalledTimes(1);
+      expect(renderer.renderAd).toHaveBeenCalledTimes(1);
+
+      orchestrator.run(document); // no new slots — root fully overlaps already-handled content
+      await flushMicrotasks();
+
+      expect(client.requestAd).toHaveBeenCalledTimes(1);
+      expect(renderer.renderAd).toHaveBeenCalledTimes(1);
+    });
+
+    it("recognizes a redisplay's replacement element as claimed too, not just the originally discovered one (US3, Edge Cases)", async () => {
+      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(el);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const orchestrator = createAdOrchestrator({ client, renderer });
+
+      orchestrator.run(document);
+      await flushMicrotasks(); // initial render
+      expect(client.requestAd).toHaveBeenCalledTimes(1);
+
+      const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      el.replaceWith(replacement);
+      await flushMicrotasks(); // redisplay — reuses the already-fetched ad, no new request
+      expect(client.requestAd).toHaveBeenCalledTimes(1);
+      expect(renderer.renderAd).toHaveBeenCalledTimes(2);
+
+      orchestrator.run(document); // later overlapping call — replacement is now what's in the DOM
+      await flushMicrotasks();
+
+      expect(client.requestAd).toHaveBeenCalledTimes(1); // still no additional request
+      expect(renderer.renderAd).toHaveBeenCalledTimes(2); // still no additional render
+    });
+
+    it("each run() call's MutationObserver disconnects only from its own slot settling, never as a side effect of another call's (regression test for the notifySlotSettled singleton bug, US4)", async () => {
+      const containerA = document.createElement("div");
+      const containerB = document.createElement("div");
+      const slotA = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const slotB = createSlotElement({ "data-platform-id": "p2", "data-ad-type-id": "leaderboard" });
+      containerA.append(slotA);
+      containerB.append(slotB);
+      document.body.innerHTML = "";
+      document.body.append(containerA, containerB);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const orchestrator = createAdOrchestrator({ client, renderer });
+
+      // Same capture technique as the wall-clock fallback test above — isolates the assertions
+      // below to these two run() calls' own observers, not any other test's.
+      const RealMutationObserver = globalThis.MutationObserver;
+      const capturedObservers: MutationObserver[] = [];
+      globalThis.MutationObserver = new Proxy(RealMutationObserver, {
+        construct(target, args) {
+          const instance = new target(...(args as ConstructorParameters<typeof MutationObserver>));
+          capturedObservers.push(instance);
+          return instance;
+        },
+      });
+
+      try {
+        orchestrator.run(containerA);
+        orchestrator.run(containerB);
+        expect(capturedObservers).toHaveLength(2);
+        const [observerA, observerB] = capturedObservers;
+        const disconnectA = jest.spyOn(observerA, "disconnect");
+        const disconnectB = jest.spyOn(observerB, "disconnect");
+
+        await flushMicrotasks(); // both slots render
+
+        // Settle A's slot via enough quiet mutation batches scoped to containerA only (mirrors the
+        // existing FR-008 settle test) — containerB is left completely alone.
+        for (let i = 0; i < 15; i++) {
+          containerA.append(document.createElement("span"));
+          await flushMicrotasks();
+        }
+
+        // Before this feature's fix, a shared single notifySlotSettled pointer would have been
+        // overwritten by run(containerB), so A's slot settling would never reach A's own
+        // disconnectIfAllResolved at all.
+        expect(disconnectA).toHaveBeenCalled();
+        expect(disconnectB).not.toHaveBeenCalled(); // B's slot hasn't settled — unaffected by A's
+
+        // Now settle B's slot too, independently.
+        for (let i = 0; i < 15; i++) {
+          containerB.append(document.createElement("span"));
+          await flushMicrotasks();
+        }
+
+        expect(disconnectB).toHaveBeenCalled();
+      } finally {
+        globalThis.MutationObserver = RealMutationObserver;
+      }
+    });
+
+    it("a slot failing in one run() call never affects a later, independent run() call's slot (US4)", async () => {
+      const containerA = document.createElement("div");
+      const containerB = document.createElement("div");
+      const slotA = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const slotB = createSlotElement({ "data-platform-id": "p2", "data-ad-type-id": "leaderboard" });
+      containerA.append(slotA);
+      containerB.append(slotB);
+      document.body.innerHTML = "";
+      document.body.append(containerA, containerB);
+
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn((request) =>
+          request.platformId === "p1"
+            ? Promise.reject(new Error("boom"))
+            : Promise.resolve({ status: "filled", ad } as AdDecisionResult),
+        ),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const orchestrator = createAdOrchestrator({ client, renderer });
+
+      orchestrator.run(containerA);
+      await flushMicrotasks();
+      expect(renderer.renderAd).not.toHaveBeenCalled(); // A's slot failed, stays unfilled
+
+      orchestrator.run(containerB);
+      await flushMicrotasks();
+
+      expect(renderer.renderAd).toHaveBeenCalledTimes(1);
+      expect(renderer.renderAd).toHaveBeenCalledWith(
+        slotB,
+        ad,
+        { platformId: "p2", adTypeId: "leaderboard" },
+        undefined,
+      );
+    });
+
+    it("a pending slot's own element is never reassigned to a same-group slot discovered by a later, overlapping run() call (caught in code review)", async () => {
+      const slotA = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(slotA);
+
+      const deferredA = deferred<AdDecisionResult>();
+      const neverResolves = new Promise<AdDecisionResult>(() => {});
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(() =>
+          (client.requestAd as jest.Mock).mock.calls.length === 1 ? deferredA.promise : neverResolves,
+        ),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const orchestrator = createAdOrchestrator({ client, renderer });
+
+      orchestrator.run(document); // tracks slotA; its requestAd is still in flight
+      await flushMicrotasks();
+
+      // A same-group slot inserted BEFORE slotA in document order, then a later, overlapping
+      // run() call discovers it — before this fix, this shifted "document-order position 0" out
+      // from under slotA, even though slotA's own element never moved (FR-006/FR-007).
+      const slotB = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.insertBefore(slotB, slotA);
+      orchestrator.run(document); // tracks slotB (slotA skipped via claimedElements)
+      await flushMicrotasks();
+
+      deferredA.resolve({ status: "filled", ad });
+      await flushMicrotasks();
+
+      // slotA's own response must render into slotA — never redirected to slotB just because a
+      // fresh position recount would otherwise call slotB "position 0".
+      expect(renderer.renderAd).toHaveBeenCalledTimes(1);
+      const [renderedElement] = (renderer.renderAd as jest.Mock).mock.calls[0];
+      expect(renderedElement).toBe(slotA);
+      expect(renderedElement).not.toBe(slotB);
     });
   });
 });
