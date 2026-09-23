@@ -426,16 +426,36 @@ export function createAdOrchestrator({
 
     function processMutationBatch(): void {
       try {
-        const currentByPosition = mapSlotsByGroupPosition(root);
+        // Computed at most once per batch, and only if some slot actually needs it (feature 009)
+        // — most mutation batches don't touch any of this call's own slots at all (unrelated host-
+        // page activity, or another run() call's own subtree), so the full querySelectorAll +
+        // regroup pass this performs is worth avoiding when nothing below will use it.
+        let currentByPositionCache: Map<string, Element> | null = null;
+        function getCurrentByPosition(): Map<string, Element> {
+          if (currentByPositionCache === null) {
+            currentByPositionCache = mapSlotsByGroupPosition(root);
+          }
+          return currentByPositionCache;
+        }
+
         for (const slot of trackedSlots) {
           if (slot.resolved) {
             continue;
           }
 
           if (!slot.renderedElement) {
-            // Not yet rendered: just keep currentElement pointed at whatever
-            // currently occupies this slot's group position (FR-001/FR-002).
-            slot.currentElement = currentByPosition.get(`${slot.groupKey}#${slot.groupPosition}`) ?? null;
+            // Not yet rendered: if this slot's own element is still right where it was, leave it
+            // alone — only recompute via document-order position when it's actually gone
+            // (feature 009 fix). Recomputing unconditionally on every batch let a same-group slot
+            // discovered by a *different* run()/refresh() call, inserted earlier in the document,
+            // silently steal this slot's identity the moment document-order position 0 stopped
+            // meaning this slot — even though this slot's own element never moved (FR-006/FR-007).
+            // A genuine removal (the case FR-001/FR-002, feature 002 exists for) is still the only
+            // thing that triggers a fresh lookup, exactly like the already-rendered branch below.
+            if (slot.currentElement && slot.currentElement.isConnected) {
+              continue;
+            }
+            slot.currentElement = getCurrentByPosition().get(`${slot.groupKey}#${slot.groupPosition}`) ?? null;
             continue;
           }
 
@@ -451,7 +471,7 @@ export function createAdOrchestrator({
             continue;
           }
 
-          const current = currentByPosition.get(`${slot.groupKey}#${slot.groupPosition}`) ?? null;
+          const current = getCurrentByPosition().get(`${slot.groupKey}#${slot.groupPosition}`) ?? null;
           slot.currentElement = current;
           if (!current) {
             // No replacement in *this* batch doesn't mean gone for good — a

@@ -350,13 +350,22 @@ describe("createAdOrchestrator.run", () => {
         throw new Error("boom");
       });
 
-    document.body.append(document.createElement("div")); // triggers a remap attempt that throws
+    // A remap is only actually attempted once this slot's own element is gone (feature 009 fix) —
+    // removing it (rather than an unrelated mutation elsewhere) is what triggers the lookup that
+    // hits the mocked throw.
+    el.remove();
     await flushMicrotasks();
 
+    // Guards against this test silently becoming vacuous (the mocked throw never actually
+    // consumed) if a future change makes remapping lazier still. Not toHaveBeenCalledTimes(1): in
+    // the full suite, other tests' still-hung MutationObservers on this same shared jsdom
+    // `document` (e.g. a slot whose requestAd deliberately never resolves) can add further,
+    // unrelated calls of their own.
+    expect(querySpy).toHaveBeenCalled();
     querySpy.mockRestore();
 
     const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
-    el.replaceWith(replacement); // a later, unaffected mutation
+    document.body.append(replacement); // a later, unaffected mutation supplies the replacement
     await flushMicrotasks();
 
     resolve({ status: "filled", ad });
@@ -1463,6 +1472,43 @@ describe("createAdOrchestrator.run", () => {
         { platformId: "p2", adTypeId: "leaderboard" },
         undefined,
       );
+    });
+
+    it("a pending slot's own element is never reassigned to a same-group slot discovered by a later, overlapping run() call (caught in code review)", async () => {
+      const slotA = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.innerHTML = "";
+      document.body.append(slotA);
+
+      const deferredA = deferred<AdDecisionResult>();
+      const neverResolves = new Promise<AdDecisionResult>(() => {});
+      const client: AdDecisionClientLike = {
+        requestAd: jest.fn(() =>
+          (client.requestAd as jest.Mock).mock.calls.length === 1 ? deferredA.promise : neverResolves,
+        ),
+      };
+      const renderer: AdRendererLike = { renderAd: jest.fn() };
+      const orchestrator = createAdOrchestrator({ client, renderer });
+
+      orchestrator.run(document); // tracks slotA; its requestAd is still in flight
+      await flushMicrotasks();
+
+      // A same-group slot inserted BEFORE slotA in document order, then a later, overlapping
+      // run() call discovers it — before this fix, this shifted "document-order position 0" out
+      // from under slotA, even though slotA's own element never moved (FR-006/FR-007).
+      const slotB = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      document.body.insertBefore(slotB, slotA);
+      orchestrator.run(document); // tracks slotB (slotA skipped via claimedElements)
+      await flushMicrotasks();
+
+      deferredA.resolve({ status: "filled", ad });
+      await flushMicrotasks();
+
+      // slotA's own response must render into slotA — never redirected to slotB just because a
+      // fresh position recount would otherwise call slotB "position 0".
+      expect(renderer.renderAd).toHaveBeenCalledTimes(1);
+      const [renderedElement] = (renderer.renderAd as jest.Mock).mock.calls[0];
+      expect(renderedElement).toBe(slotA);
+      expect(renderedElement).not.toBe(slotB);
     });
   });
 });
