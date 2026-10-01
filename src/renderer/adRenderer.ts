@@ -132,9 +132,20 @@ function buildCreativeMarkup(
   const headlineFont = asSafeCssValue(r.headlineFontFamily, "inherit");
   const ctaColor = asSafeCssColor(r.ctaTextColor, "#0369a1");
   const ctaFont = asSafeCssValue(r.ctaFontFamily, "inherit");
-  // Unlike the logo, the CTA always has a background — no enable/disable
-  // flag (FR-004, US3).
+  // Unlike the logo, a *shown* CTA always has a background — no separate
+  // enable/disable flag for the background itself (FR-004, US3, spec 003).
+  // Whether the CTA renders at all is a separate, newer question that spec
+  // never had to answer: ctaText always carried real content back then
+  // (genuine text or ad-serve-api's own now-removed "Shop Now" fallback —
+  // see ad-serve-api's adCreativeTemplate.ts). Now that a deliberately blank
+  // CTA can reach here, rendering the button pill anyway would show an
+  // empty colored shape to real visitors — the same class of bug just fixed
+  // for the headline, which has no background and so stayed harmless when
+  // empty.
   const ctaBackground = asSafeCssColor(r.ctaBackgroundColor, "#ffffff");
+  const cta = ctaText
+    ? `<span role="button" style="border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;color:${ctaColor};background-color:${ctaBackground};font-family:${ctaFont};">${ctaText}</span>`
+    : "";
 
   const hasLogoImage = hasResolvedImage(r.hasLogoImage, r.logoImageDataUrl);
   const logoBackgroundEnabled = asSafeBoolean(r.logoBackgroundEnabled, true);
@@ -209,7 +220,7 @@ function buildCreativeMarkup(
       <div style="position:relative;display:flex;align-items:flex-start;">${logo}</div>
       <div style="position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;">
         <span style="font-size:14px;font-weight:700;color:${headlineColor};font-family:${headlineFont};">${headline}</span>
-        <span role="button" style="border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;color:${ctaColor};background-color:${ctaBackground};font-family:${ctaFont};">${ctaText}</span>
+        ${cta}
       </div>
     </${wrapper.tag}>
   </body></html>`;
