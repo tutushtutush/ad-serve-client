@@ -253,6 +253,18 @@ describe("createAdRenderer", () => {
       expect(markup).toContain(">Summer Sale<");
       expect(markup).toContain(">Shop Now<");
     });
+
+    it("omits the CTA button entirely when ctaText is genuinely empty, rather than an empty colored pill", () => {
+      const markup = renderAndGetSrcdoc(makeAdWithResolvedRender({ ctaText: "" }));
+
+      expect(markup).not.toContain('role="button"');
+    });
+
+    it("still renders the headline as an empty, background-less span when headlineText is empty", () => {
+      const markup = renderAndGetSrcdoc(makeAdWithResolvedRender({ headlineText: "" }));
+
+      expect(markup).toContain("font-weight:700");
+    });
   });
 
   describe("click tracking (feature 004, US1)", () => {
