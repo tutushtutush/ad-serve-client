@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "prepare": "npm run build",
     "test": "jest",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
