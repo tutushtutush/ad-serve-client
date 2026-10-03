@@ -1,20 +1,24 @@
 import { createAdDecisionClient } from "./client/adDecisionClient";
 import { createViewableImpressionClient } from "./client/viewableImpressionClient";
 import { createAdOrchestrator } from "./orchestrator/adOrchestrator";
+import { applyQueuedCommand, isQueuedCommand } from "./orchestrator/queuedCommands";
 import { createAdRenderer } from "./renderer/adRenderer";
 import { createViewabilityDetector } from "./utils/viewabilityDetector";
 import { getOrCreateSessionId } from "./utils/sessionId";
+import type { QueuedCommand } from "./types";
 
 declare global {
   interface Window {
     adServe?: {
-      q: Array<() => void>;
+      q: Array<(() => void) | QueuedCommand>;
       // Present once main()'s bootstrap has run (feature 009) — discovers and fills every
       // not-yet-claimed ad slot under `root` (defaulting to the whole page when omitted),
       // following the exact same fill/render/track behavior as this SDK's initial-load slots.
       // Absent before then, which is exactly why `q` exists: a host page can safely call
       // `window.adServe.q.push(() => window.adServe.refresh(root))` regardless of load timing.
       refresh?: (root?: Node & ParentNode) => void;
+      // Declares the page's categories (feature 010); see specs/010-support-page-level-ad.
+      setContext?: (payload: unknown) => void;
     };
   }
 }
@@ -86,6 +90,18 @@ function main(): void {
         sessionId,
       });
 
+      // Feature 010: `[name, payload]` entries a host page queued before this SDK started (e.g. a
+      // page-level setContext) must take effect before the very first ad requests go out, so they
+      // are applied here, ahead of run(). Plain callbacks keep running after it, below, since they
+      // may call refresh(), which needs the initial run and its definition below to exist
+      // (research.md Decision 2).
+      const commandHandlers = { setContext: orchestrator.setContext };
+      for (const queued of window.adServe.q) {
+        if (isQueuedCommand(queued)) {
+          applyQueuedCommand(queued, commandHandlers);
+        }
+      }
+
       orchestrator.run(document);
 
       // Feature 009: expose a re-discovery entry point for content inserted after this initial
@@ -93,6 +109,9 @@ function main(): void {
       // rather than reconstructing any of them. Defined before the queue is drained below, since a
       // queued callback may itself call window.adServe.refresh(...) (research.md Decision 4).
       const adServe = window.adServe;
+      adServe.setContext = (payload) => {
+        applyQueuedCommand(["setContext", payload], commandHandlers);
+      };
       adServe.refresh = (root) => {
         try {
           orchestrator.run(root ?? document);
@@ -111,6 +130,9 @@ function main(): void {
       // claimed — producing duplicate requests for slots that are already filled.
       const queue = adServe.q;
       for (const queued of queue) {
+        if (isQueuedCommand(queued)) {
+          continue; // already applied before run(), above
+        }
         try {
           queued();
         } catch {
@@ -126,9 +148,13 @@ function main(): void {
       // the array's length immediately after appending, before this queue is drained back to empty
       // below (caught in code review: an earlier version returned queue.length without ever
       // actually appending, so it always reported a stale, unchanged length).
-      queue.push = (...cmds: Array<() => void>): number => {
+      queue.push = (...cmds: Array<(() => void) | QueuedCommand>): number => {
         const newLength = Array.prototype.push.apply(queue, cmds);
         for (const cmd of cmds) {
+          if (isQueuedCommand(cmd)) {
+            applyQueuedCommand(cmd, commandHandlers);
+            continue;
+          }
           try {
             cmd();
           } catch {
