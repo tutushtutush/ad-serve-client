@@ -122,7 +122,7 @@ Story 1 and 2 scenarios.
 - **FR-001**: The SDK MUST let a page declare a list of categories (plain words and/or IAB codes)
   through the existing command queue, using a `setContext` command carrying `categories`.
 - **FR-002**: The SDK MUST send the currently declared page categories with every ad request made
-  by a slot that has no category of its own, for both single and batched requests.
+  by a slot that has no category of its own.
 - **FR-003**: The SDK MUST read the declared categories at the time each request is made, so a
   declaration changed between requests applies to the next request.
 - **FR-004**: A declaration made before the bundle loads MUST be applied once the bundle loads,
@@ -131,8 +131,9 @@ Story 1 and 2 scenarios.
   replace, not merge with, the previous one.
 - **FR-006**: A slot's own category MUST take precedence over page categories for that slot, with
   no merging.
-- **FR-007**: Slots that differ only by page categories MUST NOT be wrongly grouped into the same
-  batched request; slots with the same effective category MAY share a request.
+- **FR-007**: Changing the page categories MUST NOT disturb the identity of slots already on the
+  page (their redisplay tracking and de-duplication keep working); only the category sent on
+  later requests changes.
 - **FR-008**: A declaration MUST NOT by itself cause any ad request, re-render, or re-fetch.
 - **FR-009**: Invalid declarations MUST be ignored safely and MUST NOT throw into host-page code
   or affect other queued commands.
