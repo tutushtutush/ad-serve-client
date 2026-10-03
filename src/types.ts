@@ -5,6 +5,9 @@ export interface AdSlotConfig {
   adTypeId: string;
   country?: string;
   deviceType?: string;
+  // IAB Content Taxonomy code describing the page's content (feature 010), e.g. "IAB1-6" (Music).
+  // Passed through opaquely like country/deviceType — never validated here.
+  category?: string;
   element: Element;
 }
 
@@ -13,6 +16,7 @@ export interface AdDecisionRequest {
   adTypeId: string;
   country?: string;
   deviceType?: string;
+  category?: string;
   // This SDK's own originated visitor session identifier (feature 008) — not parsed from a slot's
   // data-* attributes like the other fields here; the Orchestrator supplies it uniformly for
   // every request, not AdSlotConfig/parseSlotConfig. See adOrchestrator.ts.

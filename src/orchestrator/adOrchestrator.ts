@@ -70,6 +70,10 @@ export function parseSlotConfig(element: Element): AdSlotConfig | null {
   if (deviceType) {
     config.deviceType = deviceType;
   }
+  const category = element.getAttribute("data-category");
+  if (category) {
+    config.category = category;
+  }
   return config;
 }
 
@@ -83,7 +87,7 @@ export function discoverSlots(root: ParentNode): Element[] {
 // a group of same-configuration elements — in document order — is the one
 // signal that does survive a like-for-like replacement (research.md).
 function makeGroupKey(config: AdDecisionRequest): string {
-  return JSON.stringify([config.platformId, config.adTypeId, config.country ?? null, config.deviceType ?? null]);
+  return JSON.stringify([config.platformId, config.adTypeId, config.country ?? null, config.deviceType ?? null, config.category ?? null]);
 }
 
 // How many times a slot's ad may be (re)displayed after the first successful
@@ -156,7 +160,7 @@ interface GroupedSlotElement {
 }
 
 // Scans root for every validly-configured slot element, grouping them by
-// their (platformId, adTypeId, country, deviceType) tuple in document
+// their (platformId, adTypeId, country, deviceType, category) tuple in document
 // order. The single source of truth for group-position computation — used
 // both to create Tracked Slots at discovery time and to re-resolve their
 // current element on every later mutation (research.md) — so the two can
@@ -175,6 +179,7 @@ function groupDiscoveredSlots(root: ParentNode): GroupedSlotElement[] {
       adTypeId: parsed.adTypeId,
       country: parsed.country,
       deviceType: parsed.deviceType,
+      category: parsed.category,
     };
     const groupKey = makeGroupKey(config);
     const groupPosition = groupCounts.get(groupKey) ?? 0;

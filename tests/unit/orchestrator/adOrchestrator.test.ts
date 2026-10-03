@@ -61,6 +61,31 @@ describe("parseSlotConfig", () => {
     });
   });
 
+  it("includes optional category when present (010)", () => {
+    const el = createSlotElement({
+      "data-platform-id": "p1",
+      "data-ad-type-id": "banner",
+      "data-category": "IAB1-6",
+    });
+
+    expect(parseSlotConfig(el)).toEqual({
+      platformId: "p1",
+      adTypeId: "banner",
+      category: "IAB1-6",
+      element: el,
+    });
+  });
+
+  it("omits category when data-category is absent or empty (010)", () => {
+    const el = createSlotElement({
+      "data-platform-id": "p1",
+      "data-ad-type-id": "banner",
+      "data-category": "",
+    });
+
+    expect(parseSlotConfig(el)).toEqual({ platformId: "p1", adTypeId: "banner", element: el });
+  });
+
   it("returns null when data-platform-id is missing", () => {
     const el = createSlotElement({ "data-ad-type-id": "banner" });
 
@@ -106,6 +131,34 @@ describe("createAdOrchestrator.run", () => {
       { platformId: "p1", adTypeId: "banner" },
       undefined,
     );
+  });
+
+  it("sends each slot's own category to the client, resolving same-placement slots with different categories independently (010)", async () => {
+    const music = createSlotElement({
+      "data-platform-id": "p1",
+      "data-ad-type-id": "banner",
+      "data-category": "IAB1-6",
+    });
+    const sports = createSlotElement({
+      "data-platform-id": "p1",
+      "data-ad-type-id": "banner",
+      "data-category": "IAB17",
+    });
+    const none = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    document.body.innerHTML = "";
+    document.body.append(music, sports, none);
+
+    const client: AdDecisionClientLike = {
+      requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "empty" })),
+    };
+    const renderer: AdRendererLike = { renderAd: jest.fn() };
+    const orchestrator = createAdOrchestrator({ client, renderer });
+
+    orchestrator.run(document);
+    await new Promise(process.nextTick);
+
+    const requests = (client.requestAd as jest.Mock).mock.calls.map(([request]) => request.category);
+    expect(requests).toEqual(["IAB1-6", "IAB17", undefined]);
   });
 
   it("never calls the client for an invalid slot", async () => {

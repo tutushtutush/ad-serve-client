@@ -33,6 +33,19 @@ Optional targeting attributes:
 - `data-platform-id` and `data-ad-type-id` are required. A slot missing either is treated as
   invalid configuration (FR-005) — it resolves to empty without any network request.
 - `data-country` / `data-device-type` are optional and passed through to ad-serve-api unchanged.
+- `data-category` (feature 010) is optional: an IAB Content Taxonomy code (e.g. `IAB1-6` for Music)
+  describing the page's content. It is sent to ad-serve-api as the `category` query parameter,
+  where only campaigns targeting that category (or no category at all) are eligible. Passed
+  through unchanged and never validated by the SDK; omitted/empty means no category filtering.
+
+```html
+<div
+  data-ad-serve-slot
+  data-platform-id="3fa85f64-5717-4562-b3fc-2c963f66afa6"
+  data-ad-type-id="banner-300x250"
+  data-category="IAB1-6"
+></div>
+```
 
 ## Loading the script
 
