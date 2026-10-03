@@ -1,4 +1,5 @@
 import { asSafeString } from "../utils/asSafeString";
+import { normalizeCategories } from "../utils/normalizeCategories";
 import type { ViewabilityDetectorLike } from "../utils/viewabilityDetector";
 import type { ViewableImpressionReport } from "../client/viewableImpressionClient";
 import type {
@@ -7,6 +8,7 @@ import type {
   AdDecisionResult,
   AdSlotConfig,
   PlacementIdentity,
+  SetContextPayload,
 } from "../types";
 
 // Re-exported so consumers of this module (index.ts, tests) don't need to know it actually lives
@@ -213,6 +215,43 @@ export function createAdOrchestrator({
   // garbage-collected (removed from the DOM with nothing else referencing it) simply drops out.
   const claimedElements = new WeakSet<Element>();
 
+  // The categories the host page declared for the whole page (feature 010), already normalized.
+  // Read when each request is built, never captured on a slot, so a later declaration applies to
+  // every request made after it without touching slot identity (research.md Decisions 3-4).
+  let pageCategories: string[] = [];
+
+  // Replaces the page's categories: absent or empty clears them, a list with at least one usable
+  // entry replaces them. A payload that isn't an object, whose `categories` isn't a list, or whose
+  // non-empty list has no usable entry is ignored and the previous categories kept, so a typo
+  // can't silently drop targeting (spec.md edge cases).
+  function setContext(payload: unknown): void {
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+      return;
+    }
+    const { categories } = payload as SetContextPayload;
+    if (categories === undefined) {
+      pageCategories = [];
+      return;
+    }
+    if (!Array.isArray(categories)) {
+      return;
+    }
+    const normalized = normalizeCategories(categories);
+    if (categories.length > 0 && normalized.length === 0) {
+      return; // had entries but none usable — malformed, not a clear
+    }
+    pageCategories = normalized;
+  }
+
+  // The one place a request's category is decided: the slot's own wins outright (no merging),
+  // otherwise the page's, otherwise none. A future batch request builder must reuse this.
+  function resolveCategory(slotCategory: string | undefined): string | undefined {
+    if (slotCategory && slotCategory.trim() !== "") {
+      return slotCategory;
+    }
+    return pageCategories.length > 0 ? pageCategories.join(",") : undefined;
+  }
+
   // Wrapped, not called directly — caught in review of #10: unlike every other schedule-driven
   // entry point in this file, a bare call to a slot's notify hook had no guard of its own. If
   // `slot.notifySettled()` itself ever threw (a hostile/patched host-page global, a broken
@@ -353,7 +392,11 @@ export function createAdOrchestrator({
 
   async function runSlot(slot: TrackedSlot): Promise<void> {
     try {
-      const result = await client.requestAd({ ...slot.config, sessionId });
+      const result = await client.requestAd({
+        ...slot.config,
+        category: resolveCategory(slot.config.category),
+        sessionId,
+      });
       if (result.status !== "filled") {
         resolveSlot(slot);
         return;
@@ -539,5 +582,5 @@ export function createAdOrchestrator({
     }
   }
 
-  return { run };
+  return { run, setContext };
 }

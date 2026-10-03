@@ -95,3 +95,12 @@ export interface PlacementIdentity {
   platformId: string;
   adTypeId: string;
 }
+
+// A host page's declaration of what the page is about (feature 010). Entries are plain words or
+// IAB codes, passed through to ad-serve-api untouched; `categories` absent or empty clears it.
+export interface SetContextPayload {
+  categories?: unknown;
+}
+
+// An entry a host page may push on window.adServe.q besides a plain callback: `[name, payload]`.
+export type QueuedCommand = [name: string, payload?: unknown];
