@@ -220,9 +220,10 @@ export function createAdOrchestrator({
   // every request made after it without touching slot identity (research.md Decisions 3-4).
   let pageCategories: string[] = [];
 
-  // Replaces the page's categories: absent or empty clears them, a valid list replaces them. A
-  // payload that isn't an object, or whose `categories` isn't a list, is ignored and the previous
-  // categories kept, so a typo can't silently drop targeting (spec.md edge cases).
+  // Replaces the page's categories: absent or empty clears them, a list with at least one usable
+  // entry replaces them. A payload that isn't an object, whose `categories` isn't a list, or whose
+  // non-empty list has no usable entry is ignored and the previous categories kept, so a typo
+  // can't silently drop targeting (spec.md edge cases).
   function setContext(payload: unknown): void {
     if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
       return;
@@ -235,13 +236,17 @@ export function createAdOrchestrator({
     if (!Array.isArray(categories)) {
       return;
     }
-    pageCategories = normalizeCategories(categories);
+    const normalized = normalizeCategories(categories);
+    if (categories.length > 0 && normalized.length === 0) {
+      return; // had entries but none usable — malformed, not a clear
+    }
+    pageCategories = normalized;
   }
 
   // The one place a request's category is decided: the slot's own wins outright (no merging),
   // otherwise the page's, otherwise none. A future batch request builder must reuse this.
   function resolveCategory(slotCategory: string | undefined): string | undefined {
-    if (slotCategory) {
+    if (slotCategory && slotCategory.trim() !== "") {
       return slotCategory;
     }
     return pageCategories.length > 0 ? pageCategories.join(",") : undefined;

@@ -129,7 +129,7 @@ describe("page-level category context", () => {
       },
     );
 
-    it.each([["oops"], [null], [5], [["music"]], [{ categories: "music" }], [{ categories: 7 }]])(
+    it.each([["oops"], [null], [5], [["music"]], [{ categories: "music" }], [{ categories: 7 }], [{ categories: [123, null] }], [{ categories: ["  ", ""] }]])(
       "ignores the malformed declaration %j and keeps the previous categories",
       async (payload) => {
         const { orchestrator, categories } = setup(createSlotElement());
@@ -222,6 +222,16 @@ describe("page-level category context", () => {
       await flush();
 
       expect(categories()).toEqual(["sports", "music"]);
+    });
+
+    it("treats a whitespace-only slot category as absent and uses the page's", async () => {
+      const { orchestrator, categories } = setup(createSlotElement({ "data-category": "   " }));
+
+      orchestrator.setContext({ categories: ["music"] });
+      orchestrator.run(document);
+      await flush();
+
+      expect(categories()).toEqual(["music"]);
     });
 
     it("still honors a slot-level comma-separated list", async () => {

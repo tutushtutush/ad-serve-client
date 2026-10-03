@@ -19,7 +19,7 @@ window.adServe.setContext({ categories: ["music", "IAB1-6"] });
 |---|---|
 | `{ categories: ["music", "IAB1-6"] }` | page categories become exactly this list |
 | `{}` or `{ categories: [] }` | clears page categories |
-| anything else malformed (not an object, `categories` not an array) | ignored; previous categories kept; no error thrown |
+| anything else malformed (not an object, `categories` not an array, or a non-empty list with no usable entry) | ignored; previous categories kept; no error thrown |
 
 - Entries are plain words or IAB codes, sent as given (trimmed, case-insensitive duplicates
   removed, at most 10). Unknown words are passed through; ad-serve-api ignores unmapped ones.

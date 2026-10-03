@@ -20,10 +20,11 @@ The Orchestrator's single in-memory value.
 | `setContext({})` or `{categories: []}` | context = empty |
 | `setContext` with non-object payload, or `categories` not an array | ignored; context unchanged |
 | entry in the list is not a string, or is blank | that entry dropped; the rest kept |
+| non-empty list where no entry is usable (all non-strings or blank) | ignored; context unchanged |
 
 ## Effective category (per request)
 
-`slot.config.category` if present and non-empty; otherwise the context joined with `,`; otherwise
+`slot.config.category` if present and not blank; otherwise the context joined with `,`; otherwise
 the request carries no category. Computed when the request is built, not stored on the slot.
 
 ## QueuedCommand
