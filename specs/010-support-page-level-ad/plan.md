@@ -90,6 +90,12 @@ tests/unit/
 **Structure Decision**: Single project, extending the existing layers. `makeGroupKey` is
 deliberately left unchanged (research Decision 4).
 
+## Follow-up
+
+Batched requests (`POST /ads/batch`) are a separate future feature; see the last section of
+[research.md](research.md). Category resolution stays in one Orchestrator function so a batch
+builder can reuse it.
+
 ## Complexity Tracking
 
 None.

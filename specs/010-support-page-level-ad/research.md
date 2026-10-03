@@ -76,3 +76,11 @@ requests (FR-008); slots already filled stay as they are.
 ## Decision 8 — Release
 
 **Decision**: Ship as v1.3.0 (minor, additive). Then bump the ad-serve-api pin.
+
+## Follow-up (not in this feature) — batched requests
+
+The SDK currently makes one `GET /ads` per slot; ad-serve-api's `POST /ads/batch` exists but is
+unused (verified: neither EventPulse nor the deployed bundle calls it). A later feature may group a
+page's slots into one request. Whether `/ads/batch` avoids duplicate ads across slots is
+unverified and should be checked first. Any batch request builder MUST reuse the Orchestrator's
+single effective-category resolution (Decision 3) rather than re-implementing it.
