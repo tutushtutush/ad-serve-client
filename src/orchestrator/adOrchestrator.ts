@@ -516,10 +516,15 @@ export function createAdOrchestrator({
     // here (feature 009, FR-003) — never re-requested or re-rendered just because this call's root
     // happens to overlap previously-handled content.
     for (const { element, config, groupKey, groupPosition } of groupDiscoveredSlots(root, currentViewportWidth())) {
-      if (!config || claimedElements.has(element)) {
-        continue; // no ad type resolves at this width (feature 011), or already handled
+      if (claimedElements.has(element)) {
+        continue;
       }
+      // Claimed even when no ad type resolves at this width (feature 011): "no ad" is this slot's
+      // decision too, so a later run() after a resize must not quietly request one (FR-008).
       claimedElements.add(element);
+      if (!config) {
+        continue;
+      }
       trackedSlots.push({
         config,
         groupKey,

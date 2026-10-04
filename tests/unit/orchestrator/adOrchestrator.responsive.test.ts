@@ -274,6 +274,19 @@ describe("responsive ad types", () => {
       expect(client.requestAd).not.toHaveBeenCalled();
     });
 
+    it("does not request later for a slot that resolved to no type, even after the screen widens", async () => {
+      let width = 390;
+      const { orchestrator, client } = setup(() => width, createSlotElement({ "data-ad-types": "768:leaderboard" }));
+      orchestrator.run(document);
+      await flush();
+
+      width = 1280;
+      orchestrator.run(document);
+      await flush();
+
+      expect(client.requestAd).not.toHaveBeenCalled();
+    });
+
     it.each([
       [() => {
         throw new Error("blocked");
