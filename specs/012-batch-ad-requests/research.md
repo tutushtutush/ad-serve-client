@@ -45,6 +45,15 @@ each entry echoes the requested `platformId` and `adTypeId` in order; otherwise 
 **Decision**: Groups are split into chunks of at most 50 placements (ad-serve-api's limit), in discovery order,
 and each chunk is one batch.
 
+## Decision 8 — Batch timeout
+
+**Decision**: The batch call uses the same 3 s limit as a single request.
+
+**Rationale**: Simple, and typical batches (3 to 10 slots) finish well inside it. Known limit: ad-serve-api resolves a
+deduplicated batch's slots one at a time, so a very large batch could time out; the whole batch then falls back to
+single requests, which costs extra requests but never an empty slot. A limit that scales with the number of
+placements is the natural follow-up and is left for a later SDK change.
+
 ## Decision 7 — Optional client method
 
 **Decision**: `requestAdBatch` is optional on the orchestrator's client interface; if absent, every slot uses the

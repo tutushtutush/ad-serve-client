@@ -125,8 +125,13 @@ refresh with new slots makes its own batch while already-claimed slots are never
   falls back to its own single request.
 - **A slot that already has an ad type chosen for its width**: the choice is made once, when the batch is built,
   and not changed afterwards.
-- **Server that does not support deduplication or the batch endpoint**: treated as a failed batch and falls back
-  per slot.
+- **Server without the batch endpoint**: treated as a failed batch and falls back per slot. **Server that has the
+  endpoint but not deduplication**: it ignores the unknown option and returns ordinary results, so the slots are
+  filled as usual but not deduplicated; this is not an error and triggers no fallback.
+- **Very large batch**: the batch call uses the same time limit as a single request. The server resolves the slots of
+  a deduplicated batch one after another, so a very large batch could exceed it, in which case the whole batch falls
+  back to single requests. Typical batches of up to about ten slots are well inside the limit. A limit that grows
+  with the batch size is a candidate for a later change.
 
 ## Requirements *(mandatory)*
 
@@ -181,7 +186,7 @@ refresh with new slots makes its own batch while already-claimed slots are never
 
 ## Assumptions
 
-- ad-serve-api's batch endpoint with opt-in deduplication (ad-serve-api spec 030, PR #43) is deployed before
+- ad-serve-api's batch endpoint with opt-in deduplication (ad-serve-api spec 030, PR #43, now merged and live) was deployed before
   this ships. Until then a batch fails and every slot falls back to a single request, so shipping early is
   safe but has no benefit.
 - The batch call carries one category, country and device type for the whole request, so grouping by those is

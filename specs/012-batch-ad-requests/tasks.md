@@ -70,3 +70,8 @@ different phases.
 ## Implementation strategy
 
 MVP is Phases 1-3 plus the fallback (US3) for safety: do not ship batching without it. Commit per phase; one PR.
+
+## Phase 8: Release (done by hand, outside the original task list)
+
+- [X] T016 Bump `package.json` and the lockfile to 1.5.0, merge, tag `v1.5.0`, and bump ad-serve-api's `ad-serve-client` pin to `#v1.5.0` (ad-serve-api PR #43).
+
