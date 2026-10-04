@@ -89,6 +89,19 @@ export interface AdCandidate {
 
 export type AdDecisionResult = { status: "filled"; ad: AdCandidate } | { status: "empty" };
 
+// One slot's outcome within a batch call (feature 012): the same two results a single request can
+// give, plus "failed" for an entry the server reported as an error or invalid, so only that slot
+// falls back to its own single request.
+export type BatchEntryResult = AdDecisionResult | { status: "failed" };
+
+// The request details a whole batch carries once, shared by every placement in it.
+export interface BatchSharedFields {
+  country?: string;
+  deviceType?: string;
+  category?: string;
+  sessionId?: string;
+}
+
 // Just the two fields needed to build a click URL (feature 004) — not the full
 // AdDecisionRequest: ad-serve-api's /click endpoint doesn't accept country/deviceType.
 export interface PlacementIdentity {

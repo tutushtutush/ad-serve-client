@@ -1,12 +1,26 @@
 import { withTimeout } from "../utils/withTimeout";
-import type { AdCandidate, AdDecisionRequest, AdDecisionResult } from "../types";
+import type {
+  AdCandidate,
+  AdDecisionRequest,
+  AdDecisionResult,
+  BatchEntryResult,
+  BatchSharedFields,
+} from "../types";
 
 export interface FetchResponseLike {
   ok: boolean;
   json(): Promise<unknown>;
 }
 
-export type FetchLike = (url: string, init: { signal: AbortSignal }) => Promise<FetchResponseLike>;
+export interface FetchInitLike {
+  signal: AbortSignal;
+  // Only the batch call (feature 012) sends a body.
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+}
+
+export type FetchLike = (url: string, init: FetchInitLike) => Promise<FetchResponseLike>;
 
 const DEFAULT_TIMEOUT_MS = 3000;
 
@@ -65,11 +79,49 @@ function parseAdDecisionBody(body: unknown): AdDecisionResult {
   return { status: "empty" };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+// "no-ad"/"not-found" are final ("empty", like a single {ad: null}/404); a found entry with an
+// unusable ad, "error", "invalid" or anything unrecognised is "failed", so just that slot retries
+// as a single request.
+function parseBatchEntry(entry: Record<string, unknown>): BatchEntryResult {
+  switch (entry.outcome) {
+    case "found":
+      return isAdCandidate(entry.ad) ? { status: "filled", ad: entry.ad } : { status: "failed" };
+    case "no-ad":
+    case "not-found":
+      return { status: "empty" };
+    default:
+      return { status: "failed" };
+  }
+}
+
+// Applying results to the wrong slots would be worse than not batching, so a response is only
+// trusted when it has one entry per requested placement, in order, each echoing the placement it
+// answers for.
+function parseBatchBody(body: unknown, requests: AdDecisionRequest[]): BatchEntryResult[] | null {
+  if (!isRecord(body) || !Array.isArray(body.results) || body.results.length !== requests.length) {
+    return null;
+  }
+  const results: BatchEntryResult[] = [];
+  for (const [index, entry] of body.results.entries()) {
+    const request = requests[index];
+    if (!isRecord(entry) || entry.platformId !== request.platformId || entry.adTypeId !== request.adTypeId) {
+      return null;
+    }
+    results.push(parseBatchEntry(entry));
+  }
+  return results;
+}
+
 /**
- * Thin wrapper around ad-serve-api's `GET /ads`. Every non-success outcome —
- * `{ad: null}`, 404, 400, a network error, a timeout, or a malformed body —
- * is normalized to the same `{status: "empty"}` shape (research.md), so
- * callers never need to branch on *why* a slot didn't get an ad.
+ * Thin wrapper around ad-serve-api's `GET /ads` and `POST /ads/batch`. Every non-success outcome of
+ * a single request — `{ad: null}`, 404, 400, a network error, a timeout, or a malformed body — is
+ * normalized to the same `{status: "empty"}` shape (research.md), so callers never need to branch
+ * on *why* a slot didn't get an ad. A batch call that can't be used as a whole returns null (the
+ * caller then falls back to single requests); it never throws.
  */
 export function createAdDecisionClient(
   fetchImpl: FetchLike,
@@ -91,5 +143,38 @@ export function createAdDecisionClient(
     }
   }
 
-  return { requestAd };
+  // Feature 012: one call for several placements that share the viewer details in `shared`, with
+  // ad-serve-api's same-page deduplication on. `dedupeFallback` is deliberately not sent, so the
+  // server default (repeat an ad rather than leave a slot empty) applies.
+  async function requestAdBatch(
+    requests: AdDecisionRequest[],
+    shared: BatchSharedFields,
+  ): Promise<BatchEntryResult[] | null> {
+    try {
+      const body = {
+        placements: requests.map(({ platformId, adTypeId }) => ({ platformId, adTypeId })),
+        ...(shared.country && { country: shared.country }),
+        ...(shared.deviceType && { deviceType: shared.deviceType }),
+        ...(shared.category && { category: shared.category }),
+        ...(shared.sessionId && { sessionId: shared.sessionId }),
+        dedupe: true,
+      };
+      const response = await withTimeout(timeoutMs, (signal) =>
+        fetchImpl(`${baseUrl}/ads/batch`, {
+          signal,
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+      if (!response.ok) {
+        return null;
+      }
+      return parseBatchBody(await response.json(), requests);
+    } catch {
+      return null;
+    }
+  }
+
+  return { requestAd, requestAdBatch };
 }

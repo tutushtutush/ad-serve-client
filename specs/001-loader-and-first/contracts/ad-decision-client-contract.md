@@ -38,7 +38,18 @@ outcomes, not five.
 
 ## What the Client does NOT do
 
-- No retries. One request, one bounded attempt, per slot per page load.
+- No retries. One request, one bounded attempt, per slot per page load. (A slot whose batch failed makes its own
+  single request; that is the feature 012 fallback, not a retry of the same call.)
 - No caching of results across slots or across page loads.
 - No interpretation of `creative`'s fields — those are handed to the Renderer unmodified.
-- No batching multiple slots into one call (research.md's per-slot-independence decision).
+- No batching across scans. (Feature 012 batches the slots found by one scan; see the section above, which
+  supersedes research.md's original per-slot-independence decision for slots of one scan.)
+
+## Batched requests (feature 012)
+
+When one scan finds several slots, the SDK requests slots that share a resolved category, country and device
+type together with `POST /ads/batch` and `dedupe: true` (ad-serve-api specs 003 and 030), so slots on one page
+get different ads. A group of one slot still uses `GET /ads`. If the batch call fails, or an entry is an error,
+the affected slots fall back to `GET /ads`. See
+[specs/012-batch-ad-requests/contracts/batch-request.md](../../012-batch-ad-requests/contracts/batch-request.md).
+
