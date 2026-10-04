@@ -1,5 +1,6 @@
 import { asSafeString } from "../utils/asSafeString";
 import { normalizeCategories } from "../utils/normalizeCategories";
+import { groupSlotsForBatch } from "../utils/groupSlotsForBatch";
 import { parseBreakpointList, pickByBreakpoint, type BreakpointEntry } from "../utils/breakpointList";
 import type { ViewabilityDetectorLike } from "../utils/viewabilityDetector";
 import type { ViewableImpressionReport } from "../client/viewableImpressionClient";
@@ -8,6 +9,8 @@ import type {
   AdDecisionRequest,
   AdDecisionResult,
   AdSlotConfig,
+  BatchEntryResult,
+  BatchSharedFields,
   PlacementIdentity,
   SetContextPayload,
 } from "../types";
@@ -21,6 +24,12 @@ export type { ViewabilityDetectorLike };
 
 export interface AdDecisionClientLike {
   requestAd(request: AdDecisionRequest): Promise<AdDecisionResult>;
+  // Feature 012. Optional so a client without it (every older test fake, any custom client) simply
+  // keeps the one-request-per-slot behaviour. Resolves to null when the whole batch can't be used.
+  requestAdBatch?(
+    requests: AdDecisionRequest[],
+    shared: BatchSharedFields,
+  ): Promise<BatchEntryResult[] | null>;
 }
 
 export interface AdRendererLike {
@@ -56,6 +65,9 @@ export interface AdOrchestratorDeps {
 }
 
 const SLOT_SELECTOR = "[data-ad-serve-slot]";
+
+// ad-serve-api's per-request placement limit for POST /ads/batch (its spec 003 FR-007).
+const MAX_BATCH_PLACEMENTS = 50;
 
 /**
  * Reads a slot element's data-* attributes into an AdSlotConfig. Returns
@@ -467,40 +479,84 @@ export function createAdOrchestrator({
         category: resolveCategory(slot.config.category),
         sessionId,
       });
-      if (result.status !== "filled") {
-        resolveSlot(slot);
-        return;
-      }
-
-      // Read at resolution time, not capture time: currentElement may have
-      // been reassigned any number of times while this request was in
-      // flight (FR-003). isConnected is a final safety net against a
-      // last-instant removal the observer hasn't reacted to yet.
-      if (!slot.currentElement || !slot.currentElement.isConnected) {
-        resolveSlot(slot);
-        return;
-      }
-
-      slot.ad = result.ad;
-      renderer.renderAd(
-        slot.currentElement,
-        result.ad,
-        { platformId: slot.config.platformId, adTypeId: slot.config.adTypeId },
-        sessionId,
-      );
-      slot.renderedElement = slot.currentElement;
-      startViewabilityWatch(slot, slot.currentElement);
-      scheduleSettleTimer(slot);
-      // Deliberately not resolved yet: the render may itself be undone
-      // shortly afterward by the host page's own redraw (e.g. a hydration
-      // mismatch discarding the subtree it landed in) — the mutation
-      // observer watches renderedElement and redisplays if needed, up to
-      // a bounded number of attempts, before finally settling (FR-009/010).
+      applyResult(slot, result);
     } catch {
       // A slot that fails for any unexpected reason simply stays empty —
       // never let it escape to the host page (Constitution Principle V).
       resolveSlot(slot);
     }
+  }
+
+  // Shared by the single-request and the batch path: puts one slot's decision on the page. May
+  // throw; both callers catch and resolve the slot.
+  function applyResult(slot: TrackedSlot, result: AdDecisionResult): void {
+    if (result.status !== "filled") {
+      resolveSlot(slot);
+      return;
+    }
+
+    // Read at resolution time, not capture time: currentElement may have
+    // been reassigned any number of times while this request was in
+    // flight (FR-003). isConnected is a final safety net against a
+    // last-instant removal the observer hasn't reacted to yet.
+    if (!slot.currentElement || !slot.currentElement.isConnected) {
+      resolveSlot(slot);
+      return;
+    }
+
+    slot.ad = result.ad;
+    renderer.renderAd(
+      slot.currentElement,
+      result.ad,
+      { platformId: slot.config.platformId, adTypeId: slot.config.adTypeId },
+      sessionId,
+    );
+    slot.renderedElement = slot.currentElement;
+    startViewabilityWatch(slot, slot.currentElement);
+    scheduleSettleTimer(slot);
+    // Deliberately not resolved yet: the render may itself be undone
+    // shortly afterward by the host page's own redraw (e.g. a hydration
+    // mismatch discarding the subtree it landed in) — the mutation
+    // observer watches renderedElement and redisplays if needed, up to
+    // a bounded number of attempts, before finally settling (FR-009/010).
+  }
+
+  // Feature 012: one call for slots that share a category, country and device type, so
+  // ad-serve-api can give each a different ad. Never leaves a slot worse off than a single request
+  // would: a failed call (null or a throw) sends every slot down the single path, and an entry the
+  // server couldn't answer sends only its own slot.
+  async function runBatch(slots: TrackedSlot[]): Promise<void> {
+    const [first] = slots;
+    let results: BatchEntryResult[] | null = null;
+    try {
+      results =
+        (await client.requestAdBatch?.(
+          slots.map((slot) => slot.config),
+          {
+            country: first.config.country,
+            deviceType: first.config.deviceType,
+            category: resolveCategory(first.config.category),
+            sessionId,
+          },
+        )) ?? null;
+    } catch {
+      results = null;
+    }
+
+    await Promise.all(
+      slots.map(async (slot, index) => {
+        const result = results?.[index];
+        if (!result || result.status === "failed") {
+          await runSlot(slot);
+          return;
+        }
+        try {
+          applyResult(slot, result);
+        } catch {
+          resolveSlot(slot);
+        }
+      }),
+    );
   }
 
   function run(root: Node & ParentNode): void {
@@ -652,8 +708,23 @@ export function createAdOrchestrator({
     // Deliberately not awaited in the loop: each slot's pipeline starts
     // immediately and independently, so one slot's latency or failure can
     // never delay or affect another (FR-006/FR-007, feature 001).
-    for (const slot of trackedSlots) {
-      runSlot(slot).finally(disconnectIfAllResolved);
+    // Feature 012: slots found by this one scan are requested together when they share the details
+    // a batch can carry (resolved category, country, device type). A group of one, or a client
+    // without a batch call, takes the unchanged single-request path.
+    const chunks = client.requestAdBatch
+      ? groupSlotsForBatch(
+          trackedSlots,
+          (slot) =>
+            JSON.stringify([resolveCategory(slot.config.category), slot.config.country, slot.config.deviceType]),
+          MAX_BATCH_PLACEMENTS,
+        )
+      : trackedSlots.map((slot) => [slot]);
+    for (const chunk of chunks) {
+      if (chunk.length > 1) {
+        runBatch(chunk).finally(disconnectIfAllResolved);
+      } else {
+        runSlot(chunk[0]).finally(disconnectIfAllResolved);
+      }
     }
   }
 
