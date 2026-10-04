@@ -47,9 +47,12 @@ outcomes, not five.
 
 ## Batched requests (feature 012)
 
-When one scan finds several slots, the SDK requests slots that share a resolved category, country and device
-type together with `POST /ads/batch` and `dedupe: true` (ad-serve-api specs 003 and 030), so slots on one page
-get different ads. A group of one slot still uses `GET /ads`. If the batch call fails, or an entry is an error,
+When one scan finds several slots, the SDK requests slots that share a country and device type together with
+`POST /ads/batch` and `dedupe: true` (ad-serve-api specs 003 and 030), so slots on one page get different ads. Each
+placement carries the category its slot resolves to (ad-serve-api spec 031, SDK feature 013), so slots in different
+categories share one batch and are deduplicated against each other; the whole-request category is also sent when every
+placement shares it. A group of one slot still uses `GET /ads`. If the batch call fails, or an entry is an error,
 the affected slots fall back to `GET /ads`. See
-[specs/012-batch-ad-requests/contracts/batch-request.md](../../012-batch-ad-requests/contracts/batch-request.md).
+[specs/013-batch-across-categories/contracts/batch-request.md](../../013-batch-across-categories/contracts/batch-request.md)
+and [specs/012-batch-ad-requests/contracts/batch-request.md](../../012-batch-ad-requests/contracts/batch-request.md).
 

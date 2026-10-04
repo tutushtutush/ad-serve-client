@@ -30,11 +30,17 @@ const distinctAds: BatchImpl = async (requests) =>
 
 function setup(
   slots: HTMLElement[],
-  options: { batch?: BatchImpl | null; single?: () => Promise<AdDecisionResult>; viewportWidth?: number } = {},
+  options: { batch?: BatchImpl | null; single?: (request: AdDecisionRequest) => Promise<AdDecisionResult>; viewportWidth?: number } = {},
 ) {
   document.body.innerHTML = "";
   document.body.append(...slots);
-  const requestAd = jest.fn(options.single ?? (async (): Promise<AdDecisionResult> => ({ status: "filled", ad: makeAd({ headline: "single" }) })));
+  const requestAd = jest.fn(
+    options.single ??
+      (async (_request: AdDecisionRequest): Promise<AdDecisionResult> => ({
+        status: "filled",
+        ad: makeAd({ headline: "single" }),
+      })),
+  );
   const requestAdBatch = jest.fn(options.batch ?? distinctAds);
   const client: AdDecisionClientLike =
     options.batch === null ? { requestAd } : { requestAd, requestAdBatch };
@@ -120,18 +126,57 @@ describe("batched ad requests (012)", () => {
   describe("different details batch separately (US2)", () => {
     const withCategory = (category: string) => createSlotElement({ "data-category": category });
 
-    it("makes one batch per category, each carrying only its own category and slots", async () => {
-      const slots = [withCategory("music"), withCategory("comedy"), withCategory("music"), withCategory("comedy")];
+    it("sends slots in different categories as one batch, each placement carrying its own category (013)", async () => {
+      const slots = [withCategory("music"), withCategory("comedy"), withCategory("sports")];
+      const { orchestrator, requestAdBatch, requestAd, headlinesBySlot } = setup(slots);
+
+      orchestrator.run(document);
+      await flush();
+
+      expect(requestAdBatch).toHaveBeenCalledTimes(1);
+      const [requests, shared] = requestAdBatch.mock.calls[0];
+      expect(requests.map((request) => request.category)).toEqual(["music", "comedy", "sports"]);
+      expect(shared.category).toBeUndefined();
+      expect(requestAd).not.toHaveBeenCalled();
+      expect(headlinesBySlot(slots)).toEqual(["ad-0", "ad-1", "ad-2"]);
+    });
+
+    it("sends the shared category for the whole request only when every placement has it (013)", async () => {
+      const slots = [withCategory("music"), withCategory("music")];
       const { orchestrator, requestAdBatch } = setup(slots);
 
       orchestrator.run(document);
       await flush();
 
-      expect(requestAdBatch).toHaveBeenCalledTimes(2);
-      expect(requestAdBatch.mock.calls.map(([requests, shared]) => [requests.length, shared.category])).toEqual([
-        [2, "music"],
-        [2, "comedy"],
+      expect(requestAdBatch.mock.calls[0][1].category).toBe("music");
+      expect(requestAdBatch.mock.calls[0][0].map((request) => request.category)).toEqual(["music", "music"]);
+    });
+
+    it("resolves each placement's category as a single request would, mixing own, page and none (013)", async () => {
+      const slots = [withCategory("music"), createSlotElement(), createSlotElement({ "data-category": "  " })];
+      const { orchestrator, requestAdBatch } = setup(slots);
+
+      orchestrator.setContext({ categories: ["sports"] });
+      orchestrator.run(document);
+      await flush();
+
+      expect(requestAdBatch.mock.calls[0][0].map((request) => request.category)).toEqual([
+        "music",
+        "sports",
+        "sports",
       ]);
+      expect(requestAdBatch.mock.calls[0][1].category).toBeUndefined();
+    });
+
+    it("leaves a slot with no category at all without one, next to slots that have one (013)", async () => {
+      const slots = [withCategory("music"), createSlotElement()];
+      const { orchestrator, requestAdBatch } = setup(slots);
+
+      orchestrator.run(document);
+      await flush();
+
+      expect(requestAdBatch.mock.calls[0][0].map((request) => request.category)).toEqual(["music", undefined]);
+      expect(requestAdBatch.mock.calls[0][1].category).toBeUndefined();
     });
 
     it("groups slots by the category they resolve to, including the page category", async () => {
@@ -212,6 +257,16 @@ describe("batched ad requests (012)", () => {
 
       expect(requestAd).toHaveBeenCalledTimes(3);
       expect(headlinesBySlot(slots)).toEqual(["single", "single", "single"]);
+    });
+
+    it("falls back each slot of a mixed-category batch with its own category (013)", async () => {
+      const slots = [createSlotElement({ "data-category": "music" }), createSlotElement({ "data-category": "comedy" })];
+      const { orchestrator, requestAd } = setup(slots, { batch: async () => null });
+
+      orchestrator.run(document);
+      await flush();
+
+      expect(requestAd.mock.calls.map(([request]) => request.category).sort()).toEqual(["comedy", "music"]);
     });
 
     it("falls back only the failed entry, keeping the others' batch results", async () => {

@@ -343,4 +343,117 @@ describe("createAdDecisionClient.requestAdBatch (012)", () => {
 
     expect(await client.requestAdBatch(requests, {})).toBeNull();
   });
+
+  describe("per-placement category and scaled time limit (013)", () => {
+    it("writes each request's category on its placement and omits it when absent", async () => {
+      const { fetchImpl, client } = batchClient(jsonResponse(true, { results: [] }));
+
+      await client.requestAdBatch(
+        [
+          { platformId: "plat-1", adTypeId: "leaderboard", category: "music" },
+          { platformId: "plat-1", adTypeId: "leaderboard", category: "comedy" },
+          { platformId: "plat-1", adTypeId: "leaderboard" },
+        ],
+        { country: "US" },
+      );
+
+      const body = JSON.parse((fetchImpl as jest.Mock).mock.calls[0][1].body);
+      expect(body.placements).toEqual([
+        { platformId: "plat-1", adTypeId: "leaderboard", category: "music" },
+        { platformId: "plat-1", adTypeId: "leaderboard", category: "comedy" },
+        { platformId: "plat-1", adTypeId: "leaderboard" },
+      ]);
+      expect(body.category).toBeUndefined();
+      expect(body.country).toBe("US");
+    });
+
+    it("sends the whole-request category only when the caller gives one", async () => {
+      const { fetchImpl, client } = batchClient(jsonResponse(true, { results: [] }));
+
+      await client.requestAdBatch(
+        [
+          { platformId: "plat-1", adTypeId: "leaderboard", category: "music" },
+          { platformId: "plat-1", adTypeId: "leaderboard", category: "music" },
+        ],
+        { category: "music" },
+      );
+
+      const body = JSON.parse((fetchImpl as jest.Mock).mock.calls[0][1].body);
+      expect(body.category).toBe("music");
+      expect(body.placements.map((placement: { category?: string }) => placement.category)).toEqual(["music", "music"]);
+    });
+
+    describe("time limit", () => {
+      beforeEach(() => jest.useFakeTimers());
+      afterEach(() => jest.useRealTimers());
+
+      function hangingClient(baseMs: number) {
+        const signals: AbortSignal[] = [];
+        const fetchImpl: FetchLike = jest.fn(
+          (_url, init) =>
+            new Promise<FetchResponseLike>((_resolve, reject) => {
+              signals.push(init.signal);
+              init.signal.addEventListener("abort", () => reject(new Error("aborted")));
+            }),
+        );
+        return { signals, client: createAdDecisionClient(fetchImpl, "https://ads.example.com", baseMs) };
+      }
+
+      const placementsOf = (count: number) =>
+        Array.from({ length: count }, () => ({ platformId: "plat-1", adTypeId: "leaderboard" }));
+
+      it("keeps a single request's limit unchanged", async () => {
+        const { signals, client } = hangingClient(1000);
+
+        const pending = client.requestAd({ platformId: "plat-1", adTypeId: "leaderboard" });
+        jest.advanceTimersByTime(999);
+        expect(signals[0].aborted).toBe(false);
+        jest.advanceTimersByTime(1);
+        expect(signals[0].aborted).toBe(true);
+        await pending;
+      });
+
+      it("gives a batch of ten placements base + 250 ms for each extra placement", async () => {
+        const { signals, client } = hangingClient(1000);
+
+        const pending = client.requestAdBatch(placementsOf(10), {});
+        jest.advanceTimersByTime(1000 + 250 * 9 - 1);
+        expect(signals[0].aborted).toBe(false);
+        jest.advanceTimersByTime(1);
+        expect(signals[0].aborted).toBe(true);
+        expect(await pending).toBeNull();
+      });
+
+      it("keeps the base limit for a batch of one", async () => {
+        const { signals, client } = hangingClient(1000);
+
+        const pending = client.requestAdBatch(placementsOf(1), {});
+        jest.advanceTimersByTime(1000);
+        expect(signals[0].aborted).toBe(true);
+        await pending;
+      });
+
+      it("caps a very large batch's limit at ten seconds", async () => {
+        const { signals, client } = hangingClient(3000);
+
+        const pending = client.requestAdBatch(placementsOf(50), {});
+        jest.advanceTimersByTime(9999);
+        expect(signals[0].aborted).toBe(false);
+        jest.advanceTimersByTime(1);
+        expect(signals[0].aborted).toBe(true);
+        await pending;
+      });
+
+      it("never lowers the limit below the base when the base is already above the cap", async () => {
+        const { signals, client } = hangingClient(20000);
+
+        const pending = client.requestAdBatch(placementsOf(5), {});
+        jest.advanceTimersByTime(19999);
+        expect(signals[0].aborted).toBe(false);
+        jest.advanceTimersByTime(1);
+        expect(signals[0].aborted).toBe(true);
+        await pending;
+      });
+    });
+  });
 });
