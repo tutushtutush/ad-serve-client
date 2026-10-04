@@ -521,24 +521,31 @@ export function createAdOrchestrator({
     // a bounded number of attempts, before finally settling (FR-009/010).
   }
 
-  // Feature 012: one call for slots that share a category, country and device type, so
-  // ad-serve-api can give each a different ad. Never leaves a slot worse off than a single request
-  // would: a failed call (null or a throw) sends every slot down the single path, and an entry the
-  // server couldn't answer sends only its own slot.
+  // Feature 012: one call for slots that share a country and device type, so ad-serve-api can give
+  // each a different ad. Feature 013: each placement carries its own resolved category, so slots in
+  // different categories share the batch and are deduplicated against each other. Never leaves a
+  // slot worse off than a single request would: a failed call (null or a throw) sends every slot
+  // down the single path, and an entry the server couldn't answer sends only its own slot.
   async function runBatch(slots: TrackedSlot[]): Promise<void> {
     const [first] = slots;
+    const requests = slots.map((slot) => ({
+      ...slot.config,
+      category: resolveCategory(slot.config.category),
+    }));
+    // The whole-request category is also sent when every placement shares it, so a server that
+    // only reads that one still targets a same-category batch correctly.
+    const sharedCategory = requests.every((request) => request.category === requests[0].category)
+      ? requests[0].category
+      : undefined;
     let results: BatchEntryResult[] | null = null;
     try {
       results =
-        (await client.requestAdBatch?.(
-          slots.map((slot) => slot.config),
-          {
-            country: first.config.country,
-            deviceType: first.config.deviceType,
-            category: resolveCategory(first.config.category),
-            sessionId,
-          },
-        )) ?? null;
+        (await client.requestAdBatch?.(requests, {
+          country: first.config.country,
+          deviceType: first.config.deviceType,
+          category: sharedCategory,
+          sessionId,
+        })) ?? null;
     } catch {
       results = null;
     }
@@ -709,13 +716,13 @@ export function createAdOrchestrator({
     // immediately and independently, so one slot's latency or failure can
     // never delay or affect another (FR-006/FR-007, feature 001).
     // Feature 012: slots found by this one scan are requested together when they share the details
-    // a batch can carry (resolved category, country, device type). A group of one, or a client
-    // without a batch call, takes the unchanged single-request path.
+    // a batch carries once (country, device type; the category travels on each placement, feature
+    // 013). A group of one, or a client without a batch call, takes the unchanged single-request
+    // path.
     const chunks = client.requestAdBatch
       ? groupSlotsForBatch(
           trackedSlots,
-          (slot) =>
-            JSON.stringify([resolveCategory(slot.config.category), slot.config.country, slot.config.deviceType]),
+          (slot) => JSON.stringify([slot.config.country, slot.config.deviceType]),
           MAX_BATCH_PLACEMENTS,
         )
       : trackedSlots.map((slot) => [slot]);

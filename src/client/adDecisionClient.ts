@@ -24,6 +24,20 @@ export type FetchLike = (url: string, init: FetchInitLike) => Promise<FetchRespo
 
 const DEFAULT_TIMEOUT_MS = 3000;
 
+// Feature 013: ad-serve-api resolves a deduplicated batch's slots one after another, so a batch
+// is given a little longer for each placement beyond the first, up to a ceiling, before the
+// caller falls back to single requests. A single request keeps its own limit.
+const BATCH_EXTRA_MS_PER_PLACEMENT = 250;
+const BATCH_TIMEOUT_CEILING_MS = 10_000;
+
+function batchTimeoutMs(baseMs: number, placementCount: number): number {
+  const extraPlacements = Math.max(0, placementCount - 1);
+  return Math.min(
+    baseMs + BATCH_EXTRA_MS_PER_PLACEMENT * extraPlacements,
+    Math.max(BATCH_TIMEOUT_CEILING_MS, baseMs),
+  );
+}
+
 function buildQueryString(request: AdDecisionRequest): string {
   const params = new URLSearchParams({
     platformId: request.platformId,
@@ -144,7 +158,8 @@ export function createAdDecisionClient(
   }
 
   // Feature 012: one call for several placements that share the viewer details in `shared`, with
-  // ad-serve-api's same-page deduplication on. `dedupeFallback` is deliberately not sent, so the
+  // ad-serve-api's same-page deduplication on. Feature 013: each placement carries its own category
+  // (ad-serve-api spec 031); `shared.category`, when given, is also sent for the whole request. `dedupeFallback` is deliberately not sent, so the
   // server default (repeat an ad rather than leave a slot empty) applies.
   async function requestAdBatch(
     requests: AdDecisionRequest[],
@@ -152,14 +167,18 @@ export function createAdDecisionClient(
   ): Promise<BatchEntryResult[] | null> {
     try {
       const body = {
-        placements: requests.map(({ platformId, adTypeId }) => ({ platformId, adTypeId })),
+        placements: requests.map(({ platformId, adTypeId, category }) => ({
+          platformId,
+          adTypeId,
+          ...(category && { category }),
+        })),
         ...(shared.country && { country: shared.country }),
         ...(shared.deviceType && { deviceType: shared.deviceType }),
         ...(shared.category && { category: shared.category }),
         ...(shared.sessionId && { sessionId: shared.sessionId }),
         dedupe: true,
       };
-      const response = await withTimeout(timeoutMs, (signal) =>
+      const response = await withTimeout(batchTimeoutMs(timeoutMs, requests.length), (signal) =>
         fetchImpl(`${baseUrl}/ads/batch`, {
           signal,
           method: "POST",
