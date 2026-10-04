@@ -214,3 +214,133 @@ describe("createAdDecisionClient", () => {
     expect(result).toEqual({ status: "empty" });
   });
 });
+
+describe("createAdDecisionClient.requestAdBatch (012)", () => {
+  const baseUrl = "https://ads.example.com";
+  const requests = [
+    { platformId: "plat-1", adTypeId: "leaderboard" },
+    { platformId: "plat-1", adTypeId: "medium-rectangle" },
+  ];
+
+  function entry(overrides: Record<string, unknown>) {
+    return { platformId: "plat-1", adTypeId: "leaderboard", ...overrides };
+  }
+
+  function foundEntry(adTypeId: string, adConfigId: string) {
+    return entry({
+      adTypeId,
+      outcome: "found",
+      ad: { adConfigId, creative, width: 300, height: 250, impressionId: `imp-${adConfigId}` },
+    });
+  }
+
+  function batchClient(response: FetchResponseLike | Error) {
+    const fetchImpl: FetchLike = jest.fn(async () => {
+      if (response instanceof Error) throw response;
+      return response;
+    });
+    return { fetchImpl, client: createAdDecisionClient(fetchImpl, baseUrl) };
+  }
+
+  it("POSTs the placements, shared fields and dedupe true as JSON", async () => {
+    const { fetchImpl, client } = batchClient(jsonResponse(true, { results: [] }));
+
+    await client.requestAdBatch(requests, {
+      country: "US",
+      deviceType: "mobile",
+      category: "comedy",
+      sessionId: "session-1",
+    });
+
+    const [url, init] = (fetchImpl as jest.Mock).mock.calls[0];
+    expect(url).toBe(`${baseUrl}/ads/batch`);
+    expect(init.method).toBe("POST");
+    expect(init.headers).toEqual({ "Content-Type": "application/json" });
+    expect(JSON.parse(init.body)).toEqual({
+      placements: requests,
+      country: "US",
+      deviceType: "mobile",
+      category: "comedy",
+      sessionId: "session-1",
+      dedupe: true,
+    });
+  });
+
+  it("omits absent shared fields and never sends dedupeFallback", async () => {
+    const { fetchImpl, client } = batchClient(jsonResponse(true, { results: [] }));
+
+    await client.requestAdBatch(requests, {});
+
+    const body = JSON.parse((fetchImpl as jest.Mock).mock.calls[0][1].body);
+    expect(body).toEqual({ placements: requests, dedupe: true });
+  });
+
+  it("maps found, no-ad, not-found, error and invalid entries in order", async () => {
+    const three = [...requests, { platformId: "plat-1", adTypeId: "banner" }];
+    const { client } = batchClient(
+      jsonResponse(true, {
+        results: [
+          foundEntry("leaderboard", "ad-1"),
+          entry({ adTypeId: "medium-rectangle", outcome: "no-ad" }),
+          entry({ adTypeId: "banner", outcome: "error", error: "x" }),
+        ],
+      }),
+    );
+
+    const results = await client.requestAdBatch(three, {});
+
+    expect(results).toEqual([
+      { status: "filled", ad: expect.objectContaining({ adConfigId: "ad-1", impressionId: "imp-ad-1" }) },
+      { status: "empty" },
+      { status: "failed" },
+    ]);
+  });
+
+  it.each(["not-found", "invalid"])("maps a %s entry to empty or failed as documented", async (outcome) => {
+    const { client } = batchClient(jsonResponse(true, { results: [entry({ outcome })] }));
+
+    const results = await client.requestAdBatch([requests[0]], {});
+
+    expect(results).toEqual([{ status: outcome === "not-found" ? "empty" : "failed" }]);
+  });
+
+  it("treats a found entry without a usable ad as failed", async () => {
+    const { client } = batchClient(
+      jsonResponse(true, { results: [entry({ outcome: "found", ad: { creative: null } })] }),
+    );
+
+    expect(await client.requestAdBatch([requests[0]], {})).toEqual([{ status: "failed" }]);
+  });
+
+  it.each([
+    ["a network error", new Error("offline")],
+    ["a non-OK status", jsonResponse(false, {})],
+    ["a malformed body", jsonResponse(true, "nope")],
+    ["a body without results", jsonResponse(true, {})],
+    ["a result list of the wrong length", jsonResponse(true, { results: [entry({ outcome: "no-ad" })] })],
+    [
+      "entries that do not echo the requested placements",
+      jsonResponse(true, {
+        results: [
+          entry({ outcome: "no-ad" }),
+          entry({ adTypeId: "something-else", outcome: "no-ad" }),
+        ],
+      }),
+    ],
+  ])("returns null for %s", async (_label, response) => {
+    const { client } = batchClient(response as FetchResponseLike | Error);
+
+    expect(await client.requestAdBatch(requests, {})).toBeNull();
+  });
+
+  it("returns null when the response body cannot be parsed", async () => {
+    const { client } = batchClient({
+      ok: true,
+      json: async () => {
+        throw new Error("bad json");
+      },
+    });
+
+    expect(await client.requestAdBatch(requests, {})).toBeNull();
+  });
+});

@@ -20,14 +20,14 @@ Paths are relative to the `ad-serve-client` repository root.
 
 ## Phase 1: Setup
 
-- [ ] T001 On branch `012-batch-ad-requests`, run `npm ci && npm run typecheck && npm run lint && npm test` and note the passing baseline.
+- [X] T001 On branch `012-batch-ad-requests`, run `npm ci && npm run typecheck && npm run lint && npm test` and note the passing baseline.
 
 ## Phase 2: Foundational (blocks all stories)
 
-- [ ] T002 [P] Write failing tests in `tests/unit/client/adDecisionClient.test.ts` for `requestAdBatch`: it POSTs JSON to `/ads/batch` with the placements, shared fields and `dedupe: true` (omitting absent fields, never sending `dedupeFallback`); maps `found` to filled, `no-ad`/`not-found` to empty, `error`/`invalid` to failed; returns `null` for a network error, timeout, non-OK status, malformed body, wrong length, or echoed ids that differ.
-- [ ] T003 Add `BatchEntryResult` to `src/types.ts` and implement `requestAdBatch` in `src/client/adDecisionClient.ts` (widen `FetchLike`'s init with optional `method`, `headers`, `body`). Make T002 pass.
-- [ ] T004 [P] Write failing tests in `tests/unit/utils/groupSlotsForBatch.test.ts`: slots group by `[category, country, deviceType]`, preserve discovery order, differ in platform id/ad type within one group, and chunk at 50.
-- [ ] T005 Implement `src/utils/groupSlotsForBatch.ts` (pure, generic over the slot type, takes a key function and a chunk size). Make T004 pass.
+- [X] T002 [P] Write failing tests in `tests/unit/client/adDecisionClient.test.ts` for `requestAdBatch`: it POSTs JSON to `/ads/batch` with the placements, shared fields and `dedupe: true` (omitting absent fields, never sending `dedupeFallback`); maps `found` to filled, `no-ad`/`not-found` to empty, `error`/`invalid` to failed; returns `null` for a network error, timeout, non-OK status, malformed body, wrong length, or echoed ids that differ.
+- [X] T003 Add `BatchEntryResult` to `src/types.ts` and implement `requestAdBatch` in `src/client/adDecisionClient.ts` (widen `FetchLike`'s init with optional `method`, `headers`, `body`). Make T002 pass.
+- [X] T004 [P] Write failing tests in `tests/unit/utils/groupSlotsForBatch.test.ts`: slots group by `[category, country, deviceType]`, preserve discovery order, differ in platform id/ad type within one group, and chunk at 50.
+- [X] T005 Implement `src/utils/groupSlotsForBatch.ts` (pure, generic over the slot type, takes a key function and a chunk size). Make T004 pass.
 
 ## Phase 3: User Story 1 - Slots on one page get different ads (P1) 🎯 MVP
 
@@ -38,7 +38,7 @@ Paths are relative to the `ad-serve-client` repository root.
 
 ## Phase 4: User Story 2 - Different details batch separately (P1)
 
-- [ ] T008 [P] [US2] Add failing orchestrator tests: music and comedy slots make two batches each carrying only its own category; slots with no own category use the page category (set via `setContext`) and group with slots that declare that same category; different ad types with the same category share a batch; differing country or device type split batches; a scan of 51 same-category slots makes two batches (50 and 1... a chunk of one uses the single path).
+- [ ] T008 [P] [US2] Add failing orchestrator tests: music and comedy slots make two batches each carrying only its own category; slots with no own category use the page category (set via `setContext`) and group with slots that declare that same category; different ad types with the same category share a batch; differing country or device type split batches; a scan of 51 same-category slots makes one batch of 50 and one single request for the remaining slot.
 - [ ] T009 [US2] Fix anything T008 exposes in grouping/chunking in `src/orchestrator/adOrchestrator.ts`. Make T008 pass.
 
 ## Phase 5: User Story 3 - A failed batch never leaves slots worse off (P1)
