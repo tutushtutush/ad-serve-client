@@ -5,6 +5,7 @@ import { applyQueuedCommand, isQueuedCommand } from "./orchestrator/queuedComman
 import { createAdRenderer } from "./renderer/adRenderer";
 import { createViewabilityDetector } from "./utils/viewabilityDetector";
 import { getOrCreateSessionId } from "./utils/sessionId";
+import { readViewportWidth } from "./utils/viewportWidth";
 import type { QueuedCommand } from "./types";
 
 declare global {
@@ -88,6 +89,8 @@ function main(): void {
         viewabilityDetector,
         trackingClient,
         sessionId,
+        // Feature 011: the window's width picks an ad type from a slot's data-ad-types.
+        getViewportWidth: () => readViewportWidth(window),
       });
 
       // Feature 010: `[name, payload]` entries a host page queued before this SDK started (e.g. a
