@@ -39,7 +39,8 @@ Paths are relative to the `ad-serve-client` repository root.
 
 - [X] T012 [P] Update `specs/001-loader-and-first/contracts/ad-decision-client-contract.md` to describe per-placement categories and the new grouping, pointing at `specs/013-batch-across-categories/contracts/batch-request.md`.
 - [X] T013 Run `npm run typecheck && npm run lint && npm test && npm run build`; confirm all spec 012 scenarios pass (adjusted for the new grouping).
-- [ ] T014 After merge: bump `package.json` and the lockfile to 1.6.0, tag `v1.6.0`, and bump the `ad-serve-client` pin in ad-serve-api (separate PR there).
+- [X] T014a Bump `package.json` and the lockfile to 1.6.0 on this branch, so the tag matches the merged commit.
+- [ ] T014b After merge: tag `v1.6.0` and bump the `ad-serve-client` pin in ad-serve-api (separate PR there).
 
 ## Order
 
