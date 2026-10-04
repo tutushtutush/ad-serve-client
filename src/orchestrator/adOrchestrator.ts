@@ -1,5 +1,6 @@
 import { asSafeString } from "../utils/asSafeString";
 import { normalizeCategories } from "../utils/normalizeCategories";
+import { parseBreakpointList, pickByBreakpoint, type BreakpointEntry } from "../utils/breakpointList";
 import type { ViewabilityDetectorLike } from "../utils/viewabilityDetector";
 import type { ViewableImpressionReport } from "../client/viewableImpressionClient";
 import type {
@@ -47,6 +48,11 @@ export interface AdOrchestratorDeps {
   // any reason — every call site already treats an absent optional field as "omit it," so no
   // special-casing is needed here beyond simply passing the value through.
   sessionId?: string;
+  // The width of the window the SDK runs in (feature 011), injected rather than read from `window`
+  // here (Constitution Principle III). Read when slots are discovered, to pick an ad type from a
+  // slot's data-ad-types. Omitted, or returning something unusable, it counts as 0 — so only list
+  // entries starting at 0 can match and single-type slots behave exactly as before.
+  getViewportWidth?: () => number;
 }
 
 const SLOT_SELECTOR = "[data-ad-serve-slot]";
@@ -56,27 +62,69 @@ const SLOT_SELECTOR = "[data-ad-serve-slot]";
  * null when required fields are missing — an invalid slot per FR-005, which
  * must never reach the Client.
  */
-export function parseSlotConfig(element: Element): AdSlotConfig | null {
+// What a slot element declares in its attributes, independent of the screen: the raw text is what
+// a slot's identity is built from (see makeGroupKey), so a window resize can never change it.
+interface SlotDeclaration {
+  element: Element;
+  platformId: string;
+  adTypeIdAttribute: string | null;
+  adTypesAttribute: string | null;
+  adTypeEntries: BreakpointEntry[];
+  country: string | null;
+  deviceType: string | null;
+  category: string | null;
+}
+
+// Null when the slot can never be valid whatever the screen: no platform, or neither a single ad
+// type nor a single usable data-ad-types entry (FR-005, feature 001).
+function readSlotDeclaration(element: Element): SlotDeclaration | null {
   const platformId = element.getAttribute("data-platform-id");
-  const adTypeId = element.getAttribute("data-ad-type-id");
-  if (!platformId || !adTypeId) {
+  const adTypeIdAttribute = element.getAttribute("data-ad-type-id");
+  const adTypesAttribute = element.getAttribute("data-ad-types");
+  const adTypeEntries = parseBreakpointList(adTypesAttribute);
+  if (!platformId || (!adTypeIdAttribute && adTypeEntries.length === 0)) {
+    return null;
+  }
+  return {
+    element,
+    platformId,
+    adTypeIdAttribute,
+    adTypesAttribute,
+    adTypeEntries,
+    country: element.getAttribute("data-country"),
+    deviceType: element.getAttribute("data-device-type"),
+    category: element.getAttribute("data-category"),
+  };
+}
+
+// A usable data-ad-types entry for this width wins; otherwise the single data-ad-type-id; otherwise
+// nothing, and the slot makes no request (feature 011, data-model.md).
+function resolveAdTypeId(declaration: SlotDeclaration, viewportWidth: number): string | undefined {
+  return pickByBreakpoint(declaration.adTypeEntries, viewportWidth) ?? (declaration.adTypeIdAttribute || undefined);
+}
+
+function buildSlotConfig(declaration: SlotDeclaration, viewportWidth: number): AdSlotConfig | null {
+  const adTypeId = resolveAdTypeId(declaration, viewportWidth);
+  if (!adTypeId) {
     return null;
   }
 
-  const config: AdSlotConfig = { platformId, adTypeId, element };
-  const country = element.getAttribute("data-country");
-  if (country) {
-    config.country = country;
+  const config: AdSlotConfig = { platformId: declaration.platformId, adTypeId, element: declaration.element };
+  if (declaration.country) {
+    config.country = declaration.country;
   }
-  const deviceType = element.getAttribute("data-device-type");
-  if (deviceType) {
-    config.deviceType = deviceType;
+  if (declaration.deviceType) {
+    config.deviceType = declaration.deviceType;
   }
-  const category = element.getAttribute("data-category");
-  if (category) {
-    config.category = category;
+  if (declaration.category) {
+    config.category = declaration.category;
   }
   return config;
+}
+
+export function parseSlotConfig(element: Element, viewportWidth = 0): AdSlotConfig | null {
+  const declaration = readSlotDeclaration(element);
+  return declaration ? buildSlotConfig(declaration, viewportWidth) : null;
 }
 
 export function discoverSlots(root: ParentNode): Element[] {
@@ -88,8 +136,15 @@ export function discoverSlots(root: ParentNode): Element[] {
 // DOM node has no identity linking it back to the original, position within
 // a group of same-configuration elements — in document order — is the one
 // signal that does survive a like-for-like replacement (research.md).
-function makeGroupKey(config: AdDecisionRequest): string {
-  return JSON.stringify([config.platformId, config.adTypeId, config.country ?? null, config.deviceType ?? null, config.category ?? null]);
+function makeGroupKey(declaration: SlotDeclaration): string {
+  return JSON.stringify([
+    declaration.platformId,
+    declaration.adTypeIdAttribute,
+    declaration.adTypesAttribute,
+    declaration.country,
+    declaration.deviceType,
+    declaration.category,
+  ]);
 }
 
 // How many times a slot's ad may be (re)displayed after the first successful
@@ -156,7 +211,10 @@ interface TrackedSlot {
 
 interface GroupedSlotElement {
   element: Element;
-  config: AdDecisionRequest;
+  // Null when no ad type resolves at the current width (feature 011): the slot still counts toward
+  // its group's positions, so identity matching never shifts with the screen, but it is never
+  // tracked or requested.
+  config: AdDecisionRequest | null;
   groupKey: string;
   groupPosition: number;
 }
@@ -167,23 +225,24 @@ interface GroupedSlotElement {
 // both to create Tracked Slots at discovery time and to re-resolve their
 // current element on every later mutation (research.md) — so the two can
 // never silently diverge on how positions are assigned.
-function groupDiscoveredSlots(root: ParentNode): GroupedSlotElement[] {
+function groupDiscoveredSlots(root: ParentNode, viewportWidth: number): GroupedSlotElement[] {
   const groupCounts = new Map<string, number>();
   const grouped: GroupedSlotElement[] = [];
 
   for (const element of discoverSlots(root)) {
-    const parsed = parseSlotConfig(element);
-    if (!parsed) {
+    const declaration = readSlotDeclaration(element);
+    if (!declaration) {
       continue; // invalid config: never tracked, never requested (FR-005, feature 001)
     }
-    const config: AdDecisionRequest = {
+    const parsed = buildSlotConfig(declaration, viewportWidth);
+    const config: AdDecisionRequest | null = parsed && {
       platformId: parsed.platformId,
       adTypeId: parsed.adTypeId,
       country: parsed.country,
       deviceType: parsed.deviceType,
       category: parsed.category,
     };
-    const groupKey = makeGroupKey(config);
+    const groupKey = makeGroupKey(declaration);
     const groupPosition = groupCounts.get(groupKey) ?? 0;
     groupCounts.set(groupKey, groupPosition + 1);
     grouped.push({ element, config, groupKey, groupPosition });
@@ -192,9 +251,9 @@ function groupDiscoveredSlots(root: ParentNode): GroupedSlotElement[] {
   return grouped;
 }
 
-function mapSlotsByGroupPosition(root: ParentNode): Map<string, Element> {
+function mapSlotsByGroupPosition(root: ParentNode, viewportWidth: number): Map<string, Element> {
   const byPosition = new Map<string, Element>();
-  for (const { element, groupKey, groupPosition } of groupDiscoveredSlots(root)) {
+  for (const { element, groupKey, groupPosition } of groupDiscoveredSlots(root, viewportWidth)) {
     byPosition.set(`${groupKey}#${groupPosition}`, element);
   }
   return byPosition;
@@ -206,6 +265,7 @@ export function createAdOrchestrator({
   viewabilityDetector,
   trackingClient,
   sessionId,
+  getViewportWidth,
 }: AdOrchestratorDeps) {
   // Every element any run() call on this instance has already turned into a TrackedSlot — at
   // initial discovery, and again on each redisplay's replacement element (feature 009). A later
@@ -214,6 +274,16 @@ export function createAdOrchestrator({
   // already-claimed slot (FR-003). A WeakSet needs no manual cleanup: an element that's later
   // garbage-collected (removed from the DOM with nothing else referencing it) simply drops out.
   const claimedElements = new WeakSet<Element>();
+
+  // Read each time slots are discovered or re-matched; anything unusable counts as 0 (feature 011).
+  function currentViewportWidth(): number {
+    try {
+      const width = getViewportWidth?.();
+      return typeof width === "number" && Number.isFinite(width) && width >= 0 ? width : 0;
+    } catch {
+      return 0;
+    }
+  }
 
   // The categories the host page declared for the whole page (feature 010), already normalized.
   // Read when each request is built, never captured on a slot, so a later declaration applies to
@@ -445,11 +515,16 @@ export function createAdOrchestrator({
     // Elements already claimed by an earlier run() call (or a redisplay within one) are skipped
     // here (feature 009, FR-003) — never re-requested or re-rendered just because this call's root
     // happens to overlap previously-handled content.
-    for (const { element, config, groupKey, groupPosition } of groupDiscoveredSlots(root)) {
+    for (const { element, config, groupKey, groupPosition } of groupDiscoveredSlots(root, currentViewportWidth())) {
       if (claimedElements.has(element)) {
         continue;
       }
+      // Claimed even when no ad type resolves at this width (feature 011): "no ad" is this slot's
+      // decision too, so a later run() after a resize must not quietly request one (FR-008).
       claimedElements.add(element);
+      if (!config) {
+        continue;
+      }
       trackedSlots.push({
         config,
         groupKey,
@@ -481,7 +556,7 @@ export function createAdOrchestrator({
         let currentByPositionCache: Map<string, Element> | null = null;
         function getCurrentByPosition(): Map<string, Element> {
           if (currentByPositionCache === null) {
-            currentByPositionCache = mapSlotsByGroupPosition(root);
+            currentByPositionCache = mapSlotsByGroupPosition(root, currentViewportWidth());
           }
           return currentByPositionCache;
         }
