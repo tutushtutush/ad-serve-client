@@ -63,6 +63,8 @@ export interface ResolvedAdCreativeRender {
   logoBackgroundColor?: string;
   hasBackgroundImage?: boolean;
   backgroundImageDataUrl?: string;
+  // One of nine names (spec 014); anything else is drawn centered.
+  backgroundImagePosition?: string;
   isLinked?: boolean;
   linkUrl?: string;
   ariaLabel?: string;

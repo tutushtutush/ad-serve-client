@@ -212,6 +212,49 @@ describe("createAdRenderer", () => {
     });
   });
 
+  describe("background image position (spec 014)", () => {
+    const render = (position: unknown, hasImage = true) =>
+      renderAndGetSrcdoc(
+        makeAdWithResolvedRender({
+          hasBackgroundImage: hasImage,
+          backgroundImageDataUrl: hasImage ? "data:image/png;base64,BG" : undefined,
+          backgroundImagePosition: position as string,
+        }),
+      );
+
+    // Same table as adconfig spec 074's contracts/resolved-render.md and ad-serve-api's tests.
+    it.each([
+      ["top-left", "left top"],
+      ["top", "center top"],
+      ["top-right", "right top"],
+      ["left", "left center"],
+      ["center", "center center"],
+      ["right", "right center"],
+      ["bottom-left", "left bottom"],
+      ["bottom", "center bottom"],
+      ["bottom-right", "right bottom"],
+    ])("anchors the image at %s", (name, anchor) => {
+      expect(render(name)).toContain(`object-fit:cover;object-position:${anchor};`);
+    });
+
+    it.each([undefined, null, "", "LEFT", "left; x", 5, {}, "url(x)", "toString", "__proto__"])(
+      "centers the image for %p",
+      (value) => {
+        const markup = render(value);
+
+        expect(markup).toContain("object-fit:cover;object-position:center center;");
+        if (typeof value === "string" && value) expect(markup).not.toContain(value);
+      },
+    );
+
+    it("ignores the position when there is no background image", () => {
+      const markup = render("left", false);
+
+      expect(markup).not.toContain("object-position");
+      expect(markup).toContain("<svg");
+    });
+  });
+
   describe("clickability (US5, FR-008)", () => {
     it("renders a clickable <a> when isLinked is true and linkUrl is a safe http(s) URL", () => {
       const markup = renderAndGetSrcdoc(

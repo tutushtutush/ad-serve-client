@@ -112,6 +112,26 @@ function buildPlaceholderIcon(size: number): string {
   </svg>`;
 }
 
+// The response is untrusted, so only a name found in this table reaches the style (spec 014). The
+// same nine names and anchors are in adconfig and ad-serve-api.
+const BACKGROUND_OBJECT_POSITIONS: Readonly<Record<string, string>> = {
+  "top-left": "left top",
+  top: "center top",
+  "top-right": "right top",
+  left: "left center",
+  center: "center center",
+  right: "right center",
+  "bottom-left": "left bottom",
+  bottom: "center bottom",
+  "bottom-right": "right bottom",
+};
+
+function backgroundObjectPosition(value: unknown): string {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(BACKGROUND_OBJECT_POSITIONS, value)
+    ? BACKGROUND_OBJECT_POSITIONS[value]
+    : BACKGROUND_OBJECT_POSITIONS.center;
+}
+
 function buildCreativeMarkup(
   ad: AdCandidate,
   apiBaseUrl: string,
@@ -171,7 +191,7 @@ function buildCreativeMarkup(
   // attribute's content, letting it break out of the url() token. An <img
   // src> has no such second parsing pass to exploit.
   const backgroundLayer = hasBackgroundImage
-    ? `<img src="${escapeForMarkup(asSafeString(r.backgroundImageDataUrl))}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" />`
+    ? `<img src="${escapeForMarkup(asSafeString(r.backgroundImageDataUrl))}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:${backgroundObjectPosition(r.backgroundImagePosition)};" />`
     : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">${buildPlaceholderIcon(iconSize)}</div>`;
 
   const isLinked = asSafeBoolean(r.isLinked, false);
