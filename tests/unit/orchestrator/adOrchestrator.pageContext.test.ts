@@ -9,7 +9,6 @@ import { makeAd } from "../fixtures/adCreative";
 function createSlotElement(attrs: Record<string, string> = {}): HTMLElement {
   const el = document.createElement("div");
   el.setAttribute("data-ad-serve-slot", "");
-  el.setAttribute("data-platform-id", "p1");
   el.setAttribute("data-ad-type-id", "banner");
   for (const [key, value] of Object.entries(attrs)) {
     el.setAttribute(key, value);
@@ -36,7 +35,7 @@ function setup(...slots: HTMLElement[]) {
     requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "empty" })),
   };
   const renderer: AdRendererLike = { renderAd: jest.fn() };
-  const orchestrator = createAdOrchestrator({ client, renderer });
+  const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
   const categories = () =>
     (client.requestAd as jest.Mock).mock.calls.map(([request]) => request.category);
   return { client, renderer, orchestrator, categories };

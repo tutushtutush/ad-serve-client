@@ -12,7 +12,7 @@ Built one-to-one from a validated `AdSlotConfig` (data-model.md):
 
 | Query param  | Required | Source                          |
 |--------------|----------|----------------------------------|
-| `platformId` | yes      | slot's `data-platform-id`        |
+| `platformId` | yes      | loader script tag's `data-platform-id` |
 | `adTypeId`   | yes      | slot's `data-ad-type-id`         |
 | `country`    | no       | slot's `data-country`, if present |
 | `deviceType` | no       | slot's `data-device-type`, if present |

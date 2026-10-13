@@ -12,7 +12,6 @@ import { makeAd } from "../fixtures/adCreative";
 function createSlotElement(attrs: Record<string, string> = {}): HTMLElement {
   const el = document.createElement("div");
   el.setAttribute("data-ad-serve-slot", "");
-  el.setAttribute("data-platform-id", "p1");
   for (const [key, value] of Object.entries(attrs)) {
     el.setAttribute(key, value);
   }
@@ -49,6 +48,7 @@ function setup(width: number | (() => number), ...slots: HTMLElement[]) {
   };
   const trackingClient: ViewableImpressionClientLike = { reportViewableImpression: jest.fn() };
   const orchestrator = createAdOrchestrator({
+    platformId: "p1",
     client,
     renderer,
     viewabilityDetector,
@@ -64,15 +64,15 @@ describe("parseSlotConfig with data-ad-types", () => {
   it("resolves the type for the given width", () => {
     const el = createSlotElement({ "data-ad-types": RESPONSIVE });
 
-    expect(parseSlotConfig(el, 390)?.adTypeId).toBe("mobile-leaderboard");
-    expect(parseSlotConfig(el, 768)?.adTypeId).toBe("leaderboard");
-    expect(parseSlotConfig(el, 1280)?.adTypeId).toBe("billboard");
+    expect(parseSlotConfig(el, "p1", 390)?.adTypeId).toBe("mobile-leaderboard");
+    expect(parseSlotConfig(el, "p1", 768)?.adTypeId).toBe("leaderboard");
+    expect(parseSlotConfig(el, "p1", 1280)?.adTypeId).toBe("billboard");
   });
 
   it("returns null when nothing resolves", () => {
     const el = createSlotElement({ "data-ad-types": "768:leaderboard" });
 
-    expect(parseSlotConfig(el, 390)).toBeNull();
+    expect(parseSlotConfig(el, "p1", 390)).toBeNull();
   });
 });
 

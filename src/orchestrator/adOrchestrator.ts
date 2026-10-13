@@ -62,7 +62,15 @@ export interface AdOrchestratorDeps {
   // slot's data-ad-types. Omitted, or returning something unusable, it counts as 0 — so only list
   // entries starting at 0 can match and single-type slots behave exactly as before.
   getViewportWidth?: () => number;
+  // The page's one platform id (feature 015), read by index.ts from the loader script tag and
+  // already trimmed. Absent or blank, the orchestrator serves nothing and says so once via `warn`.
+  platformId?: string;
+  // Injected so the missing-platform message is testable (Constitution Principle III).
+  warn?: (message: string) => void;
 }
+
+const MISSING_PLATFORM_ID_MESSAGE =
+  '[ad-serve] Platform id missing: add data-platform-id="<your platform id>" to the ad-serve-client <script> tag. No ads will be served.';
 
 const SLOT_SELECTOR = "[data-ad-serve-slot]";
 
@@ -78,7 +86,6 @@ const MAX_BATCH_PLACEMENTS = 50;
 // a slot's identity is built from (see makeGroupKey), so a window resize can never change it.
 interface SlotDeclaration {
   element: Element;
-  platformId: string;
   adTypeIdAttribute: string | null;
   adTypesAttribute: string | null;
   adTypeEntries: BreakpointEntry[];
@@ -87,19 +94,18 @@ interface SlotDeclaration {
   category: string | null;
 }
 
-// Null when the slot can never be valid whatever the screen: no platform, or neither a single ad
-// type nor a single usable data-ad-types entry (FR-005, feature 001).
+// Null when the slot can never be valid whatever the screen: neither a single ad type nor a single
+// usable data-ad-types entry (FR-005, feature 001). The platform is not the slot's to declare: it
+// is one page-level value supplied by the loader script tag (feature 015).
 function readSlotDeclaration(element: Element): SlotDeclaration | null {
-  const platformId = element.getAttribute("data-platform-id");
   const adTypeIdAttribute = element.getAttribute("data-ad-type-id");
   const adTypesAttribute = element.getAttribute("data-ad-types");
   const adTypeEntries = parseBreakpointList(adTypesAttribute);
-  if (!platformId || (!adTypeIdAttribute && adTypeEntries.length === 0)) {
+  if (!adTypeIdAttribute && adTypeEntries.length === 0) {
     return null;
   }
   return {
     element,
-    platformId,
     adTypeIdAttribute,
     adTypesAttribute,
     adTypeEntries,
@@ -115,13 +121,13 @@ function resolveAdTypeId(declaration: SlotDeclaration, viewportWidth: number): s
   return pickByBreakpoint(declaration.adTypeEntries, viewportWidth) ?? (declaration.adTypeIdAttribute || undefined);
 }
 
-function buildSlotConfig(declaration: SlotDeclaration, viewportWidth: number): AdSlotConfig | null {
+function buildSlotConfig(declaration: SlotDeclaration, platformId: string, viewportWidth: number): AdSlotConfig | null {
   const adTypeId = resolveAdTypeId(declaration, viewportWidth);
   if (!adTypeId) {
     return null;
   }
 
-  const config: AdSlotConfig = { platformId: declaration.platformId, adTypeId, element: declaration.element };
+  const config: AdSlotConfig = { platformId, adTypeId, element: declaration.element };
   if (declaration.country) {
     config.country = declaration.country;
   }
@@ -134,9 +140,9 @@ function buildSlotConfig(declaration: SlotDeclaration, viewportWidth: number): A
   return config;
 }
 
-export function parseSlotConfig(element: Element, viewportWidth = 0): AdSlotConfig | null {
+export function parseSlotConfig(element: Element, platformId: string, viewportWidth = 0): AdSlotConfig | null {
   const declaration = readSlotDeclaration(element);
-  return declaration ? buildSlotConfig(declaration, viewportWidth) : null;
+  return declaration ? buildSlotConfig(declaration, platformId, viewportWidth) : null;
 }
 
 export function discoverSlots(root: ParentNode): Element[] {
@@ -150,7 +156,6 @@ export function discoverSlots(root: ParentNode): Element[] {
 // signal that does survive a like-for-like replacement (research.md).
 function makeGroupKey(declaration: SlotDeclaration): string {
   return JSON.stringify([
-    declaration.platformId,
     declaration.adTypeIdAttribute,
     declaration.adTypesAttribute,
     declaration.country,
@@ -232,12 +237,12 @@ interface GroupedSlotElement {
 }
 
 // Scans root for every validly-configured slot element, grouping them by
-// their (platformId, adTypeId, country, deviceType, category) tuple in document
+// their (adTypeId, country, deviceType, category) tuple in document
 // order. The single source of truth for group-position computation — used
 // both to create Tracked Slots at discovery time and to re-resolve their
 // current element on every later mutation (research.md) — so the two can
 // never silently diverge on how positions are assigned.
-function groupDiscoveredSlots(root: ParentNode, viewportWidth: number): GroupedSlotElement[] {
+function groupDiscoveredSlots(root: ParentNode, platformId: string, viewportWidth: number): GroupedSlotElement[] {
   const groupCounts = new Map<string, number>();
   const grouped: GroupedSlotElement[] = [];
 
@@ -246,7 +251,7 @@ function groupDiscoveredSlots(root: ParentNode, viewportWidth: number): GroupedS
     if (!declaration) {
       continue; // invalid config: never tracked, never requested (FR-005, feature 001)
     }
-    const parsed = buildSlotConfig(declaration, viewportWidth);
+    const parsed = buildSlotConfig(declaration, platformId, viewportWidth);
     const config: AdDecisionRequest | null = parsed && {
       platformId: parsed.platformId,
       adTypeId: parsed.adTypeId,
@@ -263,9 +268,9 @@ function groupDiscoveredSlots(root: ParentNode, viewportWidth: number): GroupedS
   return grouped;
 }
 
-function mapSlotsByGroupPosition(root: ParentNode, viewportWidth: number): Map<string, Element> {
+function mapSlotsByGroupPosition(root: ParentNode, platformId: string, viewportWidth: number): Map<string, Element> {
   const byPosition = new Map<string, Element>();
-  for (const { element, groupKey, groupPosition } of groupDiscoveredSlots(root, viewportWidth)) {
+  for (const { element, groupKey, groupPosition } of groupDiscoveredSlots(root, platformId, viewportWidth)) {
     byPosition.set(`${groupKey}#${groupPosition}`, element);
   }
   return byPosition;
@@ -278,7 +283,12 @@ export function createAdOrchestrator({
   trackingClient,
   sessionId,
   getViewportWidth,
+  platformId: platformIdDep,
+  warn,
 }: AdOrchestratorDeps) {
+  const platformId = (platformIdDep ?? "").trim();
+  let warnedMissingPlatformId = false;
+
   // Every element any run() call on this instance has already turned into a TrackedSlot — at
   // initial discovery, and again on each redisplay's replacement element (feature 009). A later
   // run() call's discovery loop skips any element already in here, so a readiness signal whose
@@ -567,6 +577,18 @@ export function createAdOrchestrator({
   }
 
   function run(root: Node & ParentNode): void {
+    if (!platformId) {
+      if (!warnedMissingPlatformId) {
+        warnedMissingPlatformId = true;
+        try {
+          warn?.(MISSING_PLATFORM_ID_MESSAGE);
+        } catch {
+          // A failing logger must never break the host page (Constitution Principle V).
+        }
+      }
+      return;
+    }
+
     const trackedSlots: TrackedSlot[] = [];
 
     function disconnectIfAllResolved(): void {
@@ -578,7 +600,7 @@ export function createAdOrchestrator({
     // Elements already claimed by an earlier run() call (or a redisplay within one) are skipped
     // here (feature 009, FR-003) — never re-requested or re-rendered just because this call's root
     // happens to overlap previously-handled content.
-    for (const { element, config, groupKey, groupPosition } of groupDiscoveredSlots(root, currentViewportWidth())) {
+    for (const { element, config, groupKey, groupPosition } of groupDiscoveredSlots(root, platformId, currentViewportWidth())) {
       if (claimedElements.has(element)) {
         continue;
       }
@@ -619,7 +641,7 @@ export function createAdOrchestrator({
         let currentByPositionCache: Map<string, Element> | null = null;
         function getCurrentByPosition(): Map<string, Element> {
           if (currentByPositionCache === null) {
-            currentByPositionCache = mapSlotsByGroupPosition(root, currentViewportWidth());
+            currentByPositionCache = mapSlotsByGroupPosition(root, platformId, currentViewportWidth());
           }
           return currentByPositionCache;
         }
