@@ -1,3 +1,4 @@
+import { readLoaderTagConfig } from "./utils/readLoaderTagConfig";
 import { createAdDecisionClient } from "./client/adDecisionClient";
 import { createViewableImpressionClient } from "./client/viewableImpressionClient";
 import { createAdOrchestrator } from "./orchestrator/adOrchestrator";
@@ -22,14 +23,6 @@ declare global {
       setContext?: (payload: unknown) => void;
     };
   }
-}
-
-function getApiBaseUrl(): string {
-  // Must run synchronously at module-evaluation time: document.currentScript
-  // only identifies the currently-executing script and becomes null once
-  // this script yields to the event loop (e.g. after an await).
-  const scriptEl = document.currentScript as HTMLScriptElement | null;
-  return scriptEl?.getAttribute("data-api-base-url") ?? "";
 }
 
 // A bare `window.sessionStorage` property read can itself throw (e.g. a sandboxed iframe missing
@@ -59,7 +52,10 @@ function runWhenPageReady(callback: () => void): void {
 }
 
 function main(): void {
-  const baseUrl = getApiBaseUrl();
+  // Must run synchronously at module-evaluation time: document.currentScript only identifies the
+  // currently-executing script and becomes null once this script yields to the event loop (e.g.
+  // after an await).
+  const { apiBaseUrl: baseUrl, platformId } = readLoaderTagConfig(document.currentScript);
 
   runWhenPageReady(() => {
     try {
@@ -89,6 +85,8 @@ function main(): void {
         viewabilityDetector,
         trackingClient,
         sessionId,
+        platformId,
+        warn: (message) => console.warn(message),
         // Feature 011: the window's width picks an ad type from a slot's data-ad-types.
         getViewportWidth: () => readViewportWidth(window),
       });

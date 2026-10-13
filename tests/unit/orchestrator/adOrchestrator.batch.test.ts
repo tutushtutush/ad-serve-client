@@ -9,7 +9,6 @@ import { makeAd } from "../fixtures/adCreative";
 function createSlotElement(attrs: Record<string, string> = {}): HTMLElement {
   const el = document.createElement("div");
   el.setAttribute("data-ad-serve-slot", "");
-  el.setAttribute("data-platform-id", "p1");
   el.setAttribute("data-ad-type-id", "leaderboard");
   for (const [key, value] of Object.entries(attrs)) {
     el.setAttribute(key, value);
@@ -47,6 +46,7 @@ function setup(
   const renderAd = jest.fn();
   const renderer: AdRendererLike = { renderAd };
   const orchestrator = createAdOrchestrator({
+    platformId: "p1",
     client,
     renderer,
     sessionId: "session-1",
@@ -317,9 +317,9 @@ describe("batched ad requests (012)", () => {
     });
 
     it("drops a result for a slot removed while the batch was in flight", async () => {
-      // Different platform ids so the two slots are separate groups for the SDK's own re-matching of
+      // Different ad types so the two slots are separate groups for the SDK's own re-matching of
       // removed elements by position, while still sharing one batch.
-      const slots = [createSlotElement({ "data-platform-id": "p-a" }), createSlotElement({ "data-platform-id": "p-b" })];
+      const slots = [createSlotElement({ "data-ad-type-id": "type-a" }), createSlotElement({ "data-ad-type-id": "type-b" })];
       let release!: () => void;
       const gate = new Promise<void>((resolve) => {
         release = resolve;

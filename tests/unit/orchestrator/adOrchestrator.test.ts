@@ -39,20 +39,19 @@ const ad = makeAd();
 
 describe("parseSlotConfig", () => {
   it("returns a config for a slot with required fields", () => {
-    const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const el = createSlotElement({ "data-ad-type-id": "banner" });
 
-    expect(parseSlotConfig(el)).toEqual({ platformId: "p1", adTypeId: "banner", element: el });
+    expect(parseSlotConfig(el, "p1")).toEqual({ platformId: "p1", adTypeId: "banner", element: el });
   });
 
   it("includes optional country/deviceType when present", () => {
     const el = createSlotElement({
-      "data-platform-id": "p1",
       "data-ad-type-id": "banner",
       "data-country": "US",
       "data-device-type": "desktop",
     });
 
-    expect(parseSlotConfig(el)).toEqual({
+    expect(parseSlotConfig(el, "p1")).toEqual({
       platformId: "p1",
       adTypeId: "banner",
       country: "US",
@@ -63,12 +62,11 @@ describe("parseSlotConfig", () => {
 
   it("includes optional category when present (010)", () => {
     const el = createSlotElement({
-      "data-platform-id": "p1",
       "data-ad-type-id": "banner",
       "data-category": "IAB1-6",
     });
 
-    expect(parseSlotConfig(el)).toEqual({
+    expect(parseSlotConfig(el, "p1")).toEqual({
       platformId: "p1",
       adTypeId: "banner",
       category: "IAB1-6",
@@ -78,31 +76,24 @@ describe("parseSlotConfig", () => {
 
   it("omits category when data-category is absent or empty (010)", () => {
     const el = createSlotElement({
-      "data-platform-id": "p1",
       "data-ad-type-id": "banner",
       "data-category": "",
     });
 
-    expect(parseSlotConfig(el)).toEqual({ platformId: "p1", adTypeId: "banner", element: el });
-  });
-
-  it("returns null when data-platform-id is missing", () => {
-    const el = createSlotElement({ "data-ad-type-id": "banner" });
-
-    expect(parseSlotConfig(el)).toBeNull();
+    expect(parseSlotConfig(el, "p1")).toEqual({ platformId: "p1", adTypeId: "banner", element: el });
   });
 
   it("returns null when data-ad-type-id is missing", () => {
-    const el = createSlotElement({ "data-platform-id": "p1" });
+    const el = createSlotElement({});
 
-    expect(parseSlotConfig(el)).toBeNull();
+    expect(parseSlotConfig(el, "p1")).toBeNull();
   });
 });
 
 describe("discoverSlots", () => {
   it("finds only elements marked data-ad-serve-slot", () => {
     document.body.innerHTML = "";
-    const slot = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const slot = createSlotElement({ "data-ad-type-id": "banner" });
     const other = document.createElement("div");
     document.body.append(slot, other);
 
@@ -112,7 +103,7 @@ describe("discoverSlots", () => {
 
 describe("createAdOrchestrator.run", () => {
   it("renders the ad when a valid slot resolves filled", async () => {
-    const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const el = createSlotElement({ "data-ad-type-id": "banner" });
     document.body.innerHTML = "";
     document.body.append(el);
 
@@ -120,7 +111,7 @@ describe("createAdOrchestrator.run", () => {
       requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
     };
     const renderer: AdRendererLike = { renderAd: jest.fn() };
-    const orchestrator = createAdOrchestrator({ client, renderer });
+    const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
     orchestrator.run(document);
     await new Promise(process.nextTick);
@@ -135,16 +126,14 @@ describe("createAdOrchestrator.run", () => {
 
   it("sends each slot's own category to the client, resolving same-placement slots with different categories independently (010)", async () => {
     const music = createSlotElement({
-      "data-platform-id": "p1",
       "data-ad-type-id": "banner",
       "data-category": "IAB1-6",
     });
     const sports = createSlotElement({
-      "data-platform-id": "p1",
       "data-ad-type-id": "banner",
       "data-category": "IAB17",
     });
-    const none = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const none = createSlotElement({ "data-ad-type-id": "banner" });
     document.body.innerHTML = "";
     document.body.append(music, sports, none);
 
@@ -152,7 +141,7 @@ describe("createAdOrchestrator.run", () => {
       requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "empty" })),
     };
     const renderer: AdRendererLike = { renderAd: jest.fn() };
-    const orchestrator = createAdOrchestrator({ client, renderer });
+    const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
     orchestrator.run(document);
     await new Promise(process.nextTick);
@@ -162,13 +151,13 @@ describe("createAdOrchestrator.run", () => {
   });
 
   it("never calls the client for an invalid slot", async () => {
-    const el = createSlotElement({ "data-platform-id": "p1" }); // missing adTypeId
+    const el = createSlotElement({}); // missing adTypeId
     document.body.innerHTML = "";
     document.body.append(el);
 
     const client: AdDecisionClientLike = { requestAd: jest.fn() };
     const renderer: AdRendererLike = { renderAd: jest.fn() };
-    const orchestrator = createAdOrchestrator({ client, renderer });
+    const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
     orchestrator.run(document);
     await new Promise(process.nextTick);
@@ -178,7 +167,7 @@ describe("createAdOrchestrator.run", () => {
   });
 
   it("never calls the renderer when the result is empty", async () => {
-    const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const el = createSlotElement({ "data-ad-type-id": "banner" });
     document.body.innerHTML = "";
     document.body.append(el);
 
@@ -186,7 +175,7 @@ describe("createAdOrchestrator.run", () => {
       requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "empty" })),
     };
     const renderer: AdRendererLike = { renderAd: jest.fn() };
-    const orchestrator = createAdOrchestrator({ client, renderer });
+    const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
     orchestrator.run(document);
     await new Promise(process.nextTick);
@@ -195,14 +184,14 @@ describe("createAdOrchestrator.run", () => {
   });
 
   it("discards a filled result if the slot element left the page before it arrived", async () => {
-    const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const el = createSlotElement({ "data-ad-type-id": "banner" });
     document.body.innerHTML = "";
     document.body.append(el);
 
     const { promise, resolve } = deferred<AdDecisionResult>();
     const client: AdDecisionClientLike = { requestAd: jest.fn(() => promise) };
     const renderer: AdRendererLike = { renderAd: jest.fn() };
-    const orchestrator = createAdOrchestrator({ client, renderer });
+    const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
     orchestrator.run(document);
     el.remove();
@@ -213,19 +202,19 @@ describe("createAdOrchestrator.run", () => {
   });
 
   it("resolves each slot independently — a hung slot never blocks another", async () => {
-    const hungSlot = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
-    const fastSlot = createSlotElement({ "data-platform-id": "p2", "data-ad-type-id": "leaderboard" });
+    const hungSlot = createSlotElement({ "data-ad-type-id": "banner" });
+    const fastSlot = createSlotElement({ "data-ad-type-id": "leaderboard" });
     document.body.innerHTML = "";
     document.body.append(hungSlot, fastSlot);
 
     const neverResolves = new Promise<AdDecisionResult>(() => {});
     const client: AdDecisionClientLike = {
       requestAd: jest.fn((request) =>
-        request.platformId === "p1" ? neverResolves : Promise.resolve({ status: "filled", ad }),
+        request.adTypeId === "banner" ? neverResolves : Promise.resolve({ status: "filled", ad }),
       ),
     };
     const renderer: AdRendererLike = { renderAd: jest.fn() };
-    const orchestrator = createAdOrchestrator({ client, renderer });
+    const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
     orchestrator.run(document);
     await new Promise(process.nextTick);
@@ -234,7 +223,7 @@ describe("createAdOrchestrator.run", () => {
     expect(renderer.renderAd).toHaveBeenCalledWith(
       fastSlot,
       ad,
-      { platformId: "p2", adTypeId: "leaderboard" },
+      { platformId: "p1", adTypeId: "leaderboard" },
       undefined,
     );
   });
@@ -242,18 +231,18 @@ describe("createAdOrchestrator.run", () => {
   // --- 002-resilient-slot-discovery ---
 
   it("renders into the replacement element when the original is swapped out before the ad resolves", async () => {
-    const original = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const original = createSlotElement({ "data-ad-type-id": "banner" });
     document.body.innerHTML = "";
     document.body.append(original);
 
     const { promise, resolve } = deferred<AdDecisionResult>();
     const client: AdDecisionClientLike = { requestAd: jest.fn(() => promise) };
     const renderer: AdRendererLike = { renderAd: jest.fn() };
-    const orchestrator = createAdOrchestrator({ client, renderer });
+    const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
     orchestrator.run(document);
 
-    const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const replacement = createSlotElement({ "data-ad-type-id": "banner" });
     original.replaceWith(replacement);
     await flushMicrotasks();
 
@@ -272,22 +261,22 @@ describe("createAdOrchestrator.run", () => {
   });
 
   it("renders exactly one ad even if the slot's element is replaced twice before resolution", async () => {
-    const first = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const first = createSlotElement({ "data-ad-type-id": "banner" });
     document.body.innerHTML = "";
     document.body.append(first);
 
     const { promise, resolve } = deferred<AdDecisionResult>();
     const client: AdDecisionClientLike = { requestAd: jest.fn(() => promise) };
     const renderer: AdRendererLike = { renderAd: jest.fn() };
-    const orchestrator = createAdOrchestrator({ client, renderer });
+    const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
     orchestrator.run(document);
 
-    const second = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const second = createSlotElement({ "data-ad-type-id": "banner" });
     first.replaceWith(second);
     await flushMicrotasks();
 
-    const third = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const third = createSlotElement({ "data-ad-type-id": "banner" });
     second.replaceWith(third);
     await flushMicrotasks();
 
@@ -302,14 +291,14 @@ describe("createAdOrchestrator.run", () => {
   });
 
   it("resolves empty with no render when the slot is removed for good, even after the observer has processed the removal", async () => {
-    const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const el = createSlotElement({ "data-ad-type-id": "banner" });
     document.body.innerHTML = "";
     document.body.append(el);
 
     const { promise, resolve } = deferred<AdDecisionResult>();
     const client: AdDecisionClientLike = { requestAd: jest.fn(() => promise) };
     const renderer: AdRendererLike = { renderAd: jest.fn() };
-    const orchestrator = createAdOrchestrator({ client, renderer });
+    const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
     orchestrator.run(document);
 
@@ -323,8 +312,8 @@ describe("createAdOrchestrator.run", () => {
   });
 
   it("keeps two identically-configured slots correctly distinguished when only one is replaced", async () => {
-    const slotA = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
-    const slotB = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const slotA = createSlotElement({ "data-ad-type-id": "banner" });
+    const slotB = createSlotElement({ "data-ad-type-id": "banner" });
     document.body.innerHTML = "";
     document.body.append(slotA, slotB);
 
@@ -335,11 +324,11 @@ describe("createAdOrchestrator.run", () => {
       requestAd: jest.fn(() => (requestCallCount++ === 0 ? deferredA.promise : deferredB.promise)),
     };
     const renderer: AdRendererLike = { renderAd: jest.fn() };
-    const orchestrator = createAdOrchestrator({ client, renderer });
+    const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
     orchestrator.run(document); // discovery order: slotA is group position 0, slotB is position 1
 
-    const replacementB = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const replacementB = createSlotElement({ "data-ad-type-id": "banner" });
     slotB.replaceWith(replacementB);
     await flushMicrotasks();
 
@@ -362,7 +351,7 @@ describe("createAdOrchestrator.run", () => {
   });
 
   it("does not reprocess a slot after it has resolved, even if the page mutates again", async () => {
-    const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const el = createSlotElement({ "data-ad-type-id": "banner" });
     document.body.innerHTML = "";
     document.body.append(el);
 
@@ -370,7 +359,7 @@ describe("createAdOrchestrator.run", () => {
       requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
     };
     const renderer: AdRendererLike = { renderAd: jest.fn() };
-    const orchestrator = createAdOrchestrator({ client, renderer });
+    const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
     orchestrator.run(document);
     await flushMicrotasks();
@@ -386,14 +375,14 @@ describe("createAdOrchestrator.run", () => {
   });
 
   it("recovers after a defect during mutation remapping — a later, unaffected mutation is still processed", async () => {
-    const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const el = createSlotElement({ "data-ad-type-id": "banner" });
     document.body.innerHTML = "";
     document.body.append(el);
 
     const { promise, resolve } = deferred<AdDecisionResult>();
     const client: AdDecisionClientLike = { requestAd: jest.fn(() => promise) };
     const renderer: AdRendererLike = { renderAd: jest.fn() };
-    const orchestrator = createAdOrchestrator({ client, renderer });
+    const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
     orchestrator.run(document);
 
@@ -417,7 +406,7 @@ describe("createAdOrchestrator.run", () => {
     expect(querySpy).toHaveBeenCalled();
     querySpy.mockRestore();
 
-    const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const replacement = createSlotElement({ "data-ad-type-id": "banner" });
     document.body.append(replacement); // a later, unaffected mutation supplies the replacement
     await flushMicrotasks();
 
@@ -433,7 +422,7 @@ describe("createAdOrchestrator.run", () => {
   // --- 002-resilient-slot-discovery amendment: post-render redisplay ---
 
   it("redisplays the same ad when the rendered element is removed and replaced (FR-009)", async () => {
-    const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const el = createSlotElement({ "data-ad-type-id": "banner" });
     document.body.innerHTML = "";
     document.body.append(el);
 
@@ -441,7 +430,7 @@ describe("createAdOrchestrator.run", () => {
       requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
     };
     const renderer: AdRendererLike = { renderAd: jest.fn() };
-    const orchestrator = createAdOrchestrator({ client, renderer });
+    const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
     orchestrator.run(document);
     await flushMicrotasks(); // initial render
@@ -451,7 +440,7 @@ describe("createAdOrchestrator.run", () => {
 
     // Simulate hydration's mismatch-recovery: the element we rendered into
     // is discarded and replaced with a fresh one bearing the same config.
-    const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const replacement = createSlotElement({ "data-ad-type-id": "banner" });
     (firstRenderedElement as Element).replaceWith(replacement);
     await flushMicrotasks();
 
@@ -463,7 +452,7 @@ describe("createAdOrchestrator.run", () => {
   });
 
   it("passes the same, correct placement identity to renderAd on both the initial render and a redisplay (feature 004, US1 Scenario 2)", async () => {
-    const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const el = createSlotElement({ "data-ad-type-id": "banner" });
     document.body.innerHTML = "";
     document.body.append(el);
 
@@ -471,13 +460,13 @@ describe("createAdOrchestrator.run", () => {
       requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
     };
     const renderer: AdRendererLike = { renderAd: jest.fn() };
-    const orchestrator = createAdOrchestrator({ client, renderer });
+    const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
     orchestrator.run(document);
     await flushMicrotasks();
     const [, , firstPlacement] = (renderer.renderAd as jest.Mock).mock.calls[0];
 
-    const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const replacement = createSlotElement({ "data-ad-type-id": "banner" });
     el.replaceWith(replacement);
     await flushMicrotasks();
     const [, , secondPlacement] = (renderer.renderAd as jest.Mock).mock.calls[1];
@@ -488,7 +477,7 @@ describe("createAdOrchestrator.run", () => {
   });
 
   it("stops redisplaying after a bounded number of attempts, even under continuous removal (FR-010)", async () => {
-    let current = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    let current = createSlotElement({ "data-ad-type-id": "banner" });
     document.body.innerHTML = "";
     document.body.append(current);
 
@@ -496,7 +485,7 @@ describe("createAdOrchestrator.run", () => {
       requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
     };
     const renderer: AdRendererLike = { renderAd: jest.fn() };
-    const orchestrator = createAdOrchestrator({ client, renderer });
+    const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
     orchestrator.run(document);
     await flushMicrotasks(); // initial render (attempt 1)
@@ -504,7 +493,7 @@ describe("createAdOrchestrator.run", () => {
     // Keep replacing the rendered element well beyond any reasonable budget.
     const replacements = 10;
     for (let i = 0; i < replacements; i++) {
-      const next = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const next = createSlotElement({ "data-ad-type-id": "banner" });
       current.replaceWith(next);
       current = next;
       await flushMicrotasks();
@@ -519,14 +508,14 @@ describe("createAdOrchestrator.run", () => {
 
     // Further replacement after the budget is exhausted must not add more.
     const afterBudget = totalRenders;
-    const next = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const next = createSlotElement({ "data-ad-type-id": "banner" });
     current.replaceWith(next);
     await flushMicrotasks();
     expect(renderer.renderAd).toHaveBeenCalledTimes(afterBudget);
   });
 
   it("settles after surviving enough consecutive quiet mutations, and a later removal has no further effect (FR-008)", async () => {
-    const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const el = createSlotElement({ "data-ad-type-id": "banner" });
     document.body.innerHTML = "";
     document.body.append(el);
 
@@ -534,7 +523,7 @@ describe("createAdOrchestrator.run", () => {
       requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
     };
     const renderer: AdRendererLike = { renderAd: jest.fn() };
-    const orchestrator = createAdOrchestrator({ client, renderer });
+    const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
     orchestrator.run(document);
     await flushMicrotasks(); // initial render
@@ -559,7 +548,7 @@ describe("createAdOrchestrator.run", () => {
   });
 
   it("still redisplays when the replacement arrives in a later mutation batch, not the same one as the removal", async () => {
-    const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const el = createSlotElement({ "data-ad-type-id": "banner" });
     document.body.innerHTML = "";
     document.body.append(el);
 
@@ -567,7 +556,7 @@ describe("createAdOrchestrator.run", () => {
       requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
     };
     const renderer: AdRendererLike = { renderAd: jest.fn() };
-    const orchestrator = createAdOrchestrator({ client, renderer });
+    const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
     orchestrator.run(document);
     await flushMicrotasks(); // initial render
@@ -580,7 +569,7 @@ describe("createAdOrchestrator.run", () => {
     expect(renderer.renderAd).toHaveBeenCalledTimes(1); // no redisplay yet, but not given up either
 
     // The replacement arrives in a distinctly later batch.
-    const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+    const replacement = createSlotElement({ "data-ad-type-id": "banner" });
     document.body.append(replacement);
     await flushMicrotasks();
 
@@ -618,7 +607,7 @@ describe("createAdOrchestrator.run", () => {
 
   describe("viewability tracking", () => {
     it("starts a viewability watch on the rendered element after a successful render, when adConfigId is available", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -629,6 +618,7 @@ describe("createAdOrchestrator.run", () => {
       const { detector, watchCalls } = createFakeViewabilityDetector();
       const trackingClient = createFakeTrackingClient();
       const orchestrator = createAdOrchestrator({
+        platformId: "p1",
         client,
         renderer,
         viewabilityDetector: detector,
@@ -643,7 +633,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("reports via trackingClient with the correct identifiers once the watch fires", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -654,6 +644,7 @@ describe("createAdOrchestrator.run", () => {
       const { detector, watchCalls } = createFakeViewabilityDetector();
       const trackingClient = createFakeTrackingClient();
       const orchestrator = createAdOrchestrator({
+        platformId: "p1",
         client,
         renderer,
         viewabilityDetector: detector,
@@ -673,7 +664,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("reports with impressionId when present on the decision response (feature 007, US2)", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -685,6 +676,7 @@ describe("createAdOrchestrator.run", () => {
       const { detector, watchCalls } = createFakeViewabilityDetector();
       const trackingClient = createFakeTrackingClient();
       const orchestrator = createAdOrchestrator({
+        platformId: "p1",
         client,
         renderer,
         viewabilityDetector: detector,
@@ -705,7 +697,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("never starts a watch when adConfigId is unavailable (FR-004)", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -716,6 +708,7 @@ describe("createAdOrchestrator.run", () => {
       const { detector, watchCalls } = createFakeViewabilityDetector();
       const trackingClient = createFakeTrackingClient();
       const orchestrator = createAdOrchestrator({
+        platformId: "p1",
         client,
         renderer,
         viewabilityDetector: detector,
@@ -730,7 +723,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("never starts a watch when adConfigId is unavailable, even with impressionId present (feature 007, US3)", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -742,6 +735,7 @@ describe("createAdOrchestrator.run", () => {
       const { detector, watchCalls } = createFakeViewabilityDetector();
       const trackingClient = createFakeTrackingClient();
       const orchestrator = createAdOrchestrator({
+        platformId: "p1",
         client,
         renderer,
         viewabilityDetector: detector,
@@ -757,7 +751,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("never reports a non-string adConfigId as-is, degrading like a missing one (caught in code review)", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -771,6 +765,7 @@ describe("createAdOrchestrator.run", () => {
       const { detector, watchCalls } = createFakeViewabilityDetector();
       const trackingClient = createFakeTrackingClient();
       const orchestrator = createAdOrchestrator({
+        platformId: "p1",
         client,
         renderer,
         viewabilityDetector: detector,
@@ -785,7 +780,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("never starts a watch, and never throws, when viewabilityDetector/trackingClient aren't provided", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -793,7 +788,7 @@ describe("createAdOrchestrator.run", () => {
         requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad: adWithConfig })),
       };
       const renderer: AdRendererLike = { renderAd: jest.fn() };
-      const orchestrator = createAdOrchestrator({ client, renderer }); // no viewability deps
+      const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer }); // no viewability deps
 
       orchestrator.run(document);
       await flushMicrotasks();
@@ -802,7 +797,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("a redisplay stops the pre-redisplay watch and starts an independent new one (FR-003, spec Acceptance Scenario 4)", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -813,6 +808,7 @@ describe("createAdOrchestrator.run", () => {
       const { detector, watchCalls } = createFakeViewabilityDetector();
       const trackingClient = createFakeTrackingClient();
       const orchestrator = createAdOrchestrator({
+        platformId: "p1",
         client,
         renderer,
         viewabilityDetector: detector,
@@ -824,7 +820,7 @@ describe("createAdOrchestrator.run", () => {
       expect(watchCalls).toHaveLength(1);
       const firstWatch = watchCalls[0];
 
-      const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const replacement = createSlotElement({ "data-ad-type-id": "banner" });
       el.replaceWith(replacement);
       await flushMicrotasks(); // redisplay
 
@@ -838,7 +834,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("a redisplay's report reuses the original impressionId, never a new one (feature 007, US2, spec Acceptance Scenario 2)", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -850,6 +846,7 @@ describe("createAdOrchestrator.run", () => {
       const { detector, watchCalls } = createFakeViewabilityDetector();
       const trackingClient = createFakeTrackingClient();
       const orchestrator = createAdOrchestrator({
+        platformId: "p1",
         client,
         renderer,
         viewabilityDetector: detector,
@@ -859,7 +856,7 @@ describe("createAdOrchestrator.run", () => {
       orchestrator.run(document);
       await flushMicrotasks(); // initial render
 
-      const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const replacement = createSlotElement({ "data-ad-type-id": "banner" });
       el.replaceWith(replacement);
       await flushMicrotasks(); // redisplay — same slot.ad, no new decision request
 
@@ -871,7 +868,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("keeps a still-pending watch alive when a slot settles via quiet mutation batches while its element stays connected (caught in code review)", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -882,6 +879,7 @@ describe("createAdOrchestrator.run", () => {
       const { detector, watchCalls } = createFakeViewabilityDetector();
       const trackingClient = createFakeTrackingClient();
       const orchestrator = createAdOrchestrator({
+        platformId: "p1",
         client,
         renderer,
         viewabilityDetector: detector,
@@ -910,7 +908,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("stops a still-pending watch once a slot's redisplay budget is exhausted after genuine removals (FR-007)", async () => {
-      let current = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      let current = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(current);
 
@@ -921,6 +919,7 @@ describe("createAdOrchestrator.run", () => {
       const { detector, watchCalls } = createFakeViewabilityDetector();
       const trackingClient = createFakeTrackingClient();
       const orchestrator = createAdOrchestrator({
+        platformId: "p1",
         client,
         renderer,
         viewabilityDetector: detector,
@@ -936,7 +935,7 @@ describe("createAdOrchestrator.run", () => {
       // watch and stops the previous one; the very last one, once the budget is exhausted, is
       // never replaced by a new watch and must itself be stopped.
       for (let i = 0; i < 10; i++) {
-        const next = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+        const next = createSlotElement({ "data-ad-type-id": "banner" });
         current.replaceWith(next);
         current = next;
         await flushMicrotasks();
@@ -947,7 +946,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("does not report a duplicate viewable impression across redisplays once already reported (ad-serve-client #7)", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -958,6 +957,7 @@ describe("createAdOrchestrator.run", () => {
       const { detector, watchCalls } = createFakeViewabilityDetector();
       const trackingClient = createFakeTrackingClient();
       const orchestrator = createAdOrchestrator({
+        platformId: "p1",
         client,
         renderer,
         viewabilityDetector: detector,
@@ -973,7 +973,7 @@ describe("createAdOrchestrator.run", () => {
       expect(trackingClient.reportViewableImpression).toHaveBeenCalledTimes(1);
 
       // A redisplay after the report must not start a new watch at all — nothing left to report.
-      const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const replacement = createSlotElement({ "data-ad-type-id": "banner" });
       el.replaceWith(replacement);
       await flushMicrotasks();
 
@@ -983,7 +983,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("clears stopViewabilityWatch once the watch gives up on its own, so a later redisplay never re-invokes its stale stop() (caught in review of #8)", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -994,6 +994,7 @@ describe("createAdOrchestrator.run", () => {
       const { detector, watchCalls } = createFakeViewabilityDetector();
       const trackingClient = createFakeTrackingClient();
       const orchestrator = createAdOrchestrator({
+        platformId: "p1",
         client,
         renderer,
         viewabilityDetector: detector,
@@ -1010,7 +1011,7 @@ describe("createAdOrchestrator.run", () => {
 
       // A redisplay afterward starts an independent new watch, same as any other redisplay —
       // and must not call the first watch's now-stale stop() again.
-      const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const replacement = createSlotElement({ "data-ad-type-id": "banner" });
       el.replaceWith(replacement);
       await flushMicrotasks();
 
@@ -1019,7 +1020,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("a throwing trackingClient.reportViewableImpression does not propagate", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -1034,6 +1035,7 @@ describe("createAdOrchestrator.run", () => {
         }),
       };
       const orchestrator = createAdOrchestrator({
+        platformId: "p1",
         client,
         renderer,
         viewabilityDetector: detector,
@@ -1047,8 +1049,8 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("a throwing viewabilityDetector.watch does not prevent the ad from rendering or another slot from processing", async () => {
-      const throwingSlot = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
-      const okSlot = createSlotElement({ "data-platform-id": "p2", "data-ad-type-id": "leaderboard" });
+      const throwingSlot = createSlotElement({ "data-ad-type-id": "banner" });
+      const okSlot = createSlotElement({ "data-ad-type-id": "leaderboard" });
       document.body.innerHTML = "";
       document.body.append(throwingSlot, okSlot);
 
@@ -1066,6 +1068,7 @@ describe("createAdOrchestrator.run", () => {
       };
       const trackingClient = createFakeTrackingClient();
       const orchestrator = createAdOrchestrator({
+        platformId: "p1",
         client,
         renderer,
         viewabilityDetector: detector,
@@ -1083,8 +1086,8 @@ describe("createAdOrchestrator.run", () => {
 
   describe("visitor session identifier threading (feature 008)", () => {
     it("US2: forwards the identical sessionId to requestAd, reportViewableImpression, and renderAd across two slots", async () => {
-      const elA = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
-      const elB = createSlotElement({ "data-platform-id": "p2", "data-ad-type-id": "leaderboard" });
+      const elA = createSlotElement({ "data-ad-type-id": "banner" });
+      const elB = createSlotElement({ "data-ad-type-id": "leaderboard" });
       document.body.innerHTML = "";
       document.body.append(elA, elB);
 
@@ -1095,6 +1098,7 @@ describe("createAdOrchestrator.run", () => {
       const { detector, watchCalls } = createFakeViewabilityDetector();
       const trackingClient = createFakeTrackingClient();
       const orchestrator = createAdOrchestrator({
+        platformId: "p1",
         client,
         renderer,
         viewabilityDetector: detector,
@@ -1121,7 +1125,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("US3: an orchestrator with no sessionId behaves identically to before this feature — no field, no error", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -1132,6 +1136,7 @@ describe("createAdOrchestrator.run", () => {
       const { detector, watchCalls } = createFakeViewabilityDetector();
       const trackingClient = createFakeTrackingClient();
       const orchestrator = createAdOrchestrator({
+        platformId: "p1",
         client,
         renderer,
         viewabilityDetector: detector,
@@ -1166,7 +1171,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("settles via the wall-clock fallback on a page that produces no further mutations, and actually releases the top-level MutationObserver (ad-serve-client#9)", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -1174,7 +1179,7 @@ describe("createAdOrchestrator.run", () => {
         requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
       };
       const renderer: AdRendererLike = { renderAd: jest.fn() };
-      const orchestrator = createAdOrchestrator({ client, renderer });
+      const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
       // A prototype-wide spy would also catch disconnect() calls from *other* tests' still-active
       // MutationObservers sharing this same jsdom `document` (e.g. a hung-promise test whose
@@ -1216,7 +1221,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("mutation-count settling still wins when it happens first — the wall-clock timer firing afterward is a no-op", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -1224,7 +1229,7 @@ describe("createAdOrchestrator.run", () => {
         requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
       };
       const renderer: AdRendererLike = { renderAd: jest.fn() };
-      const orchestrator = createAdOrchestrator({ client, renderer });
+      const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
       orchestrator.run(document);
       await jest.advanceTimersByTimeAsync(0); // initial render
@@ -1247,7 +1252,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("genuine redisplay churn within the wall-clock window is unaffected — the timer never preempts a legitimate redisplay", async () => {
-      let current = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      let current = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(current);
 
@@ -1255,7 +1260,7 @@ describe("createAdOrchestrator.run", () => {
         requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
       };
       const renderer: AdRendererLike = { renderAd: jest.fn() };
-      const orchestrator = createAdOrchestrator({ client, renderer });
+      const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
       orchestrator.run(document);
       await jest.advanceTimersByTimeAsync(0); // initial render
@@ -1264,7 +1269,7 @@ describe("createAdOrchestrator.run", () => {
       // the *previous* render — each one restarts the timer, so it's never actually preempted.
       for (let i = 0; i < 2; i++) {
         await jest.advanceTimersByTimeAsync(REDISPLAY_SETTLE_TIMEOUT_MS - 1000);
-        const next = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+        const next = createSlotElement({ "data-ad-type-id": "banner" });
         current.replaceWith(next);
         current = next;
         await jest.advanceTimersByTimeAsync(0);
@@ -1275,7 +1280,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("a slot resolved for good (redisplay budget exhausted) cancels its pending wall-clock timer", async () => {
-      let current = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      let current = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(current);
 
@@ -1283,7 +1288,7 @@ describe("createAdOrchestrator.run", () => {
         requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
       };
       const renderer: AdRendererLike = { renderAd: jest.fn() };
-      const orchestrator = createAdOrchestrator({ client, renderer });
+      const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
       orchestrator.run(document);
       await jest.advanceTimersByTimeAsync(0); // initial render (attempt 1)
@@ -1291,7 +1296,7 @@ describe("createAdOrchestrator.run", () => {
       // Exhaust the redisplay budget via genuine removals, well before the wall-clock threshold
       // (mirrors the existing FR-010 test).
       for (let i = 0; i < 10; i++) {
-        const next = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+        const next = createSlotElement({ "data-ad-type-id": "banner" });
         current.replaceWith(next);
         current = next;
         await jest.advanceTimersByTimeAsync(0);
@@ -1306,8 +1311,8 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("independent per-slot wall-clock timers — a quiet slot settles via timeout while a churning slot's timer keeps restarting", async () => {
-      const quietSlot = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
-      let churningCurrent = createSlotElement({ "data-platform-id": "p2", "data-ad-type-id": "leaderboard" });
+      const quietSlot = createSlotElement({ "data-ad-type-id": "banner" });
+      let churningCurrent = createSlotElement({ "data-ad-type-id": "leaderboard" });
       document.body.innerHTML = "";
       document.body.append(quietSlot, churningCurrent);
 
@@ -1315,7 +1320,7 @@ describe("createAdOrchestrator.run", () => {
         requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
       };
       const renderer: AdRendererLike = { renderAd: jest.fn() };
-      const orchestrator = createAdOrchestrator({ client, renderer });
+      const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
       orchestrator.run(document);
       await jest.advanceTimersByTimeAsync(0); // both initial renders
@@ -1324,7 +1329,7 @@ describe("createAdOrchestrator.run", () => {
       // Just before the quiet slot's threshold, genuinely redisplay ONLY the churning slot —
       // restarting its own timer, while the quiet slot's own countdown continues untouched.
       await jest.advanceTimersByTimeAsync(REDISPLAY_SETTLE_TIMEOUT_MS - 1000);
-      const nextChurning = createSlotElement({ "data-platform-id": "p2", "data-ad-type-id": "leaderboard" });
+      const nextChurning = createSlotElement({ "data-ad-type-id": "leaderboard" });
       churningCurrent.replaceWith(nextChurning);
       churningCurrent = nextChurning;
       await jest.advanceTimersByTimeAsync(0);
@@ -1340,7 +1345,7 @@ describe("createAdOrchestrator.run", () => {
 
       // Churning slot's timer was restarted only 1000ms ago by its own redisplay — still well
       // within its own window — so a genuine removal-and-reinsertion still redisplays it normally.
-      const finalReplacement = createSlotElement({ "data-platform-id": "p2", "data-ad-type-id": "leaderboard" });
+      const finalReplacement = createSlotElement({ "data-ad-type-id": "leaderboard" });
       churningCurrent.replaceWith(finalReplacement);
       await jest.advanceTimersByTimeAsync(0);
       expect(renderer.renderAd).toHaveBeenCalledTimes(4);
@@ -1351,7 +1356,7 @@ describe("createAdOrchestrator.run", () => {
 
   describe("re-discovery across multiple run() calls (feature 009)", () => {
     it("fills a genuinely new slot inserted after the first run() call, on a later run() call (US1)", async () => {
-      const first = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const first = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(first);
 
@@ -1359,13 +1364,13 @@ describe("createAdOrchestrator.run", () => {
         requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
       };
       const renderer: AdRendererLike = { renderAd: jest.fn() };
-      const orchestrator = createAdOrchestrator({ client, renderer });
+      const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
       orchestrator.run(document);
       await flushMicrotasks();
       expect(client.requestAd).toHaveBeenCalledTimes(1);
 
-      const second = createSlotElement({ "data-platform-id": "p2", "data-ad-type-id": "leaderboard" });
+      const second = createSlotElement({ "data-ad-type-id": "leaderboard" });
       document.body.append(second);
 
       orchestrator.run(document);
@@ -1378,7 +1383,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("a later run() call over already-handled content never re-requests or re-renders an already-claimed slot (US3)", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -1386,7 +1391,7 @@ describe("createAdOrchestrator.run", () => {
         requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
       };
       const renderer: AdRendererLike = { renderAd: jest.fn() };
-      const orchestrator = createAdOrchestrator({ client, renderer });
+      const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
       orchestrator.run(document);
       await flushMicrotasks();
@@ -1401,7 +1406,7 @@ describe("createAdOrchestrator.run", () => {
     });
 
     it("recognizes a redisplay's replacement element as claimed too, not just the originally discovered one (US3, Edge Cases)", async () => {
-      const el = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const el = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(el);
 
@@ -1409,13 +1414,13 @@ describe("createAdOrchestrator.run", () => {
         requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
       };
       const renderer: AdRendererLike = { renderAd: jest.fn() };
-      const orchestrator = createAdOrchestrator({ client, renderer });
+      const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
       orchestrator.run(document);
       await flushMicrotasks(); // initial render
       expect(client.requestAd).toHaveBeenCalledTimes(1);
 
-      const replacement = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const replacement = createSlotElement({ "data-ad-type-id": "banner" });
       el.replaceWith(replacement);
       await flushMicrotasks(); // redisplay — reuses the already-fetched ad, no new request
       expect(client.requestAd).toHaveBeenCalledTimes(1);
@@ -1431,8 +1436,8 @@ describe("createAdOrchestrator.run", () => {
     it("each run() call's MutationObserver disconnects only from its own slot settling, never as a side effect of another call's (regression test for the notifySlotSettled singleton bug, US4)", async () => {
       const containerA = document.createElement("div");
       const containerB = document.createElement("div");
-      const slotA = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
-      const slotB = createSlotElement({ "data-platform-id": "p2", "data-ad-type-id": "leaderboard" });
+      const slotA = createSlotElement({ "data-ad-type-id": "banner" });
+      const slotB = createSlotElement({ "data-ad-type-id": "leaderboard" });
       containerA.append(slotA);
       containerB.append(slotB);
       document.body.innerHTML = "";
@@ -1442,7 +1447,7 @@ describe("createAdOrchestrator.run", () => {
         requestAd: jest.fn(async (): Promise<AdDecisionResult> => ({ status: "filled", ad })),
       };
       const renderer: AdRendererLike = { renderAd: jest.fn() };
-      const orchestrator = createAdOrchestrator({ client, renderer });
+      const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
       // Same capture technique as the wall-clock fallback test above — isolates the assertions
       // below to these two run() calls' own observers, not any other test's.
@@ -1494,8 +1499,8 @@ describe("createAdOrchestrator.run", () => {
     it("a slot failing in one run() call never affects a later, independent run() call's slot (US4)", async () => {
       const containerA = document.createElement("div");
       const containerB = document.createElement("div");
-      const slotA = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
-      const slotB = createSlotElement({ "data-platform-id": "p2", "data-ad-type-id": "leaderboard" });
+      const slotA = createSlotElement({ "data-ad-type-id": "banner" });
+      const slotB = createSlotElement({ "data-ad-type-id": "leaderboard" });
       containerA.append(slotA);
       containerB.append(slotB);
       document.body.innerHTML = "";
@@ -1503,13 +1508,13 @@ describe("createAdOrchestrator.run", () => {
 
       const client: AdDecisionClientLike = {
         requestAd: jest.fn((request) =>
-          request.platformId === "p1"
+          request.adTypeId === "banner"
             ? Promise.reject(new Error("boom"))
             : Promise.resolve({ status: "filled", ad } as AdDecisionResult),
         ),
       };
       const renderer: AdRendererLike = { renderAd: jest.fn() };
-      const orchestrator = createAdOrchestrator({ client, renderer });
+      const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
       orchestrator.run(containerA);
       await flushMicrotasks();
@@ -1522,13 +1527,13 @@ describe("createAdOrchestrator.run", () => {
       expect(renderer.renderAd).toHaveBeenCalledWith(
         slotB,
         ad,
-        { platformId: "p2", adTypeId: "leaderboard" },
+        { platformId: "p1", adTypeId: "leaderboard" },
         undefined,
       );
     });
 
     it("a pending slot's own element is never reassigned to a same-group slot discovered by a later, overlapping run() call (caught in code review)", async () => {
-      const slotA = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const slotA = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.innerHTML = "";
       document.body.append(slotA);
 
@@ -1540,7 +1545,7 @@ describe("createAdOrchestrator.run", () => {
         ),
       };
       const renderer: AdRendererLike = { renderAd: jest.fn() };
-      const orchestrator = createAdOrchestrator({ client, renderer });
+      const orchestrator = createAdOrchestrator({ platformId: "p1", client, renderer });
 
       orchestrator.run(document); // tracks slotA; its requestAd is still in flight
       await flushMicrotasks();
@@ -1548,7 +1553,7 @@ describe("createAdOrchestrator.run", () => {
       // A same-group slot inserted BEFORE slotA in document order, then a later, overlapping
       // run() call discovers it — before this fix, this shifted "document-order position 0" out
       // from under slotA, even though slotA's own element never moved (FR-006/FR-007).
-      const slotB = createSlotElement({ "data-platform-id": "p1", "data-ad-type-id": "banner" });
+      const slotB = createSlotElement({ "data-ad-type-id": "banner" });
       document.body.insertBefore(slotB, slotA);
       orchestrator.run(document); // tracks slotB (slotA skipped via claimedElements)
       await flushMicrotasks();
