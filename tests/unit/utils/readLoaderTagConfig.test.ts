@@ -15,11 +15,7 @@ describe("readLoaderTagConfig", () => {
     expect(readLoaderTagConfig(el)).toEqual({ apiBaseUrl: "https://ads.example.com", platformId: "plat-1" });
   });
 
-  it("trims the platform id", () => {
-    expect(readLoaderTagConfig(scriptWith({ "data-platform-id": "  plat-1\n" })).platformId).toBe("plat-1");
-  });
-
-  it.each([["absent", {}], ["empty", { "data-platform-id": "" }], ["blank", { "data-platform-id": "  " }]])(
+  it.each([["absent", {}], ["empty", { "data-platform-id": "" }]])(
     "gives an empty platform id when it is %s",
     (_label, attrs) => {
       expect(readLoaderTagConfig(scriptWith(attrs)).platformId).toBe("");

@@ -62,8 +62,8 @@ export interface AdOrchestratorDeps {
   // slot's data-ad-types. Omitted, or returning something unusable, it counts as 0 — so only list
   // entries starting at 0 can match and single-type slots behave exactly as before.
   getViewportWidth?: () => number;
-  // The page's one platform id (feature 015), read by index.ts from the loader script tag and
-  // already trimmed. Absent or blank, the orchestrator serves nothing and says so once via `warn`.
+  // The page's one platform id (feature 015), read by index.ts from the loader script tag. Trimmed
+  // here; absent or blank, the orchestrator serves nothing and says so once via `warn`.
   platformId?: string;
   // Injected so the missing-platform message is testable (Constitution Principle III).
   warn?: (message: string) => void;

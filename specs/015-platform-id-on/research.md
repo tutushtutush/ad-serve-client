@@ -14,7 +14,7 @@
 
 ## 3. Who owns the "serve nothing" decision
 
-**Decision**: The orchestrator takes `platformId` (a trimmed string, empty when missing) and `warn` as dependencies. If `platformId` is empty, `run()` logs once per orchestrator lifetime and returns without discovering slots. `index.ts` still sets up `window.adServe` and the queue, so queued callbacks and `refresh`/`setContext` keep working harmlessly.
+**Decision**: The orchestrator takes `platformId` (the raw tag value; the orchestrator trims it once, empty or blank means missing) and `warn` as dependencies. If `platformId` is empty, `run()` logs once per orchestrator lifetime and returns without discovering slots. `index.ts` still sets up `window.adServe` and the queue, so queued callbacks and `refresh`/`setContext` keep working harmlessly.
 **Rationale**: Keeps the rule unit-testable with a fake `warn` (Principle III) and covers initial scans and later `refresh()` calls with one guard. Warning once satisfies FR-006.
 **Alternatives**: Skip building the orchestrator when the id is missing (leaves `refresh` undefined, so host code calling `adServe.refresh` throws; riskier for Principle V); warn in `index.ts` only (the orchestrator would still need its own guard).
 
