@@ -33,12 +33,23 @@ the two (see Notes).
 1. Confirm this is a git repository (`git rev-parse --is-inside-work-tree`). If not, report an
    error and stop — do not attempt branch creation outside a repo.
 
-2. Extract the first three whitespace-separated words from `$ARGUMENTS`, preserving them as
-   typed (punctuation and casing get normalized in the next step):
+2. Extract the first three whitespace-separated words of the feature description, preserving them
+   as typed (punctuation and casing get normalized in the next step). Run the block below exactly as
+   written. It starts at the left margin on purpose: the here-document's closing line must be at
+   column 0 or the shell never finds it.
 
-   ```bash
-   FIRST_THREE=$(printf '%s' "$ARGUMENTS" | awk '{print $1, $2, $3}')
-   ```
+```bash
+# The description goes in through a here-document with a quoted delimiter, so nothing in it (quotes,
+# apostrophes, dollar signs, backticks) is ever interpreted by the shell. Do not wrap it in a command
+# substitution (bash 3.2 mis-parses that) and do not paste it inside quotes. Named variables are used
+# below instead of positional ones, because the skill runner replaces positional names in this text
+# with the invocation's words before it is read.
+IFS= read -r -d '' DESCRIPTION <<'SPECKIT_DESCRIPTION_END' || true
+$ARGUMENTS
+SPECKIT_DESCRIPTION_END
+read -r W1 W2 W3 _ <<<"$DESCRIPTION"
+FIRST_THREE=$(printf '%s %s %s' "$W1" "$W2" "$W3" | sed 's/[[:space:]]*$//')
+```
 
    If the description has fewer than three words, this naturally yields however many exist.
 
@@ -48,7 +59,7 @@ the two (see Notes).
    create any directories:
 
    ```bash
-   .specify/scripts/bash/create-new-feature.sh --json --dry-run --short-name "$FIRST_THREE" "$ARGUMENTS"
+   .specify/scripts/bash/create-new-feature.sh --json --dry-run --short-name "$FIRST_THREE" "$DESCRIPTION"
    ```
 
    Parse `BRANCH_NAME` and `FEATURE_NUM` from the JSON output. If the script errors (e.g. empty
