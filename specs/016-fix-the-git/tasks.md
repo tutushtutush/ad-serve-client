@@ -18,7 +18,7 @@ Tests are included (FR-006). No application code changes. Merge only when the ow
 
 - [X] T005 Run `npm run lint`, `npx tsc --noEmit` and the full unit suite.
 - [X] T006 Check by hand that `/speckit-specify` for a description with an apostrophe, a dollar sign and a backtick creates the branch without help (quickstart step 3), then delete that scratch branch and spec folder; record the result in `research.md`. Done by running the real hook text as the skill runner presented it for a description with an apostrophe, a dollar sign, backticks, quotes and an open parenthesis (steps 2 and 3, the changed part); steps 4 to 6 are unchanged and were not run so as not to switch branches with uncommitted work. See research.md. Done by running the new skill text's steps 2 and 3 for a description with an apostrophe, a dollar sign, backticks, quotes and an open parenthesis against this repository's `create-new-feature.sh`; the words and the dry-run branch were right and nothing executed. Steps 4 to 6 are unchanged.
-- [ ] T007 Note in `research.md` that the other repositories carrying the skill are fixed in their own specs and link their PRs. ad-serve-api and ad-serve-client get the same change through their own specs; PR links are added there when they exist.
+- [X] T007 Note in `research.md` that the other repositories carrying the skill are fixed in their own specs and link their PRs. ad-serve-api and ad-serve-client get the same change through their own specs; PR links are added there when they exist.
 
 ## Dependencies
 
