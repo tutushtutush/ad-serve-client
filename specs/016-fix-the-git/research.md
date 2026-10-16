@@ -61,3 +61,7 @@ adconfig's spec 079 found and recorded two things that this copy already include
 ## Result
 
 Tests:       34 passed, 34 total: 34 of 34 cases pass under macOS's bash 3.2, bash and zsh against this repository's script. Run by hand with a description holding `$1`, backticks, quotes and an open parenthesis, steps 2 and 3 gave the words "Test the skill's" and a dry-run branch, with nothing executed.
+
+## Same fix in the other repositories (T007)
+
+The same skill fix, each through its own spec and PR: adconfig spec 079 ([adconfig #127](https://github.com/tutushtutush/adconfig/pull/127)), ad-serve-api spec 048 ([ad-serve-api #76](https://github.com/tutushtutush/ad-serve-api/pull/76)), ad-serve-client spec 016 ([ad-serve-client #25](https://github.com/tutushtutush/ad-serve-client/pull/25)). All three merged 2026-10-16.
