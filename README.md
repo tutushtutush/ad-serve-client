@@ -72,7 +72,7 @@ window.adServe.setViewerId(null);
 
 Later requests carry no identifier, the stored one is removed, and the attribute does not create a new one on that page.
 
-The identifier goes on ad requests only (not on click or viewable-impression reports) and is never rendered. If storage is blocked, nothing is sent and ads work as before. Details: [viewer-id-embed.md](specs/017-viewer-identifier-for/contracts/viewer-id-embed.md).
+The identifier goes on ad requests only (not on click or viewable-impression reports) and is never rendered. On a single-slot request it travels in the URL's query string, which a CDN or host can record in its access logs, and with several slots it travels in the request body; so use a random identifier that is not tied to a person. The attribute must be exactly `local`; any other value is ignored with a console warning. If storage is blocked, nothing is sent and ads work as before. Details: [viewer-id-embed.md](specs/017-viewer-identifier-for/contracts/viewer-id-embed.md).
 
 ## Development
 

@@ -121,6 +121,25 @@ describe("platform-supplied identifier through the page (017, US1)", () => {
   });
 });
 
+describe("an unrecognised data-viewer-id-storage value (017 review)", () => {
+  it.each(["Local", "true", ""])("warns once about %j, ignores it and sends nothing", async (value) => {
+    const { requests } = loadSdk({ viewerIdStorage: value });
+    await flush();
+
+    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect((console.warn as jest.Mock).mock.calls[0][0]).toContain("data-viewer-id-storage");
+    expect(requests[0].url).not.toContain("viewerId");
+    expect(window.localStorage.getItem("adServeViewerId")).toBeNull();
+  });
+
+  it.each([undefined, "local"])("does not warn for %p", async (value) => {
+    loadSdk({ viewerIdStorage: value });
+    await flush();
+
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+});
+
 describe("a setViewerId call with the wrong number of arguments (017 edge case)", () => {
   async function refreshAfter(call: () => void) {
     const { requests } = loadSdk({ queue: [["setViewerId", UUID]] });

@@ -72,7 +72,14 @@ function main(): void {
   // Must run synchronously at module-evaluation time: document.currentScript only identifies the
   // currently-executing script and becomes null once this script yields to the event loop (e.g.
   // after an await).
-  const { apiBaseUrl: baseUrl, platformId, viewerIdStorage } = readLoaderTagConfig(document.currentScript);
+  const { apiBaseUrl: baseUrl, platformId, viewerIdStorage, viewerIdStorageUnrecognized } = readLoaderTagConfig(
+    document.currentScript,
+  );
+  if (viewerIdStorageUnrecognized) {
+    console.warn(
+      'ad-serve: data-viewer-id-storage must be exactly "local" to let the SDK keep a viewer identifier. The attribute is ignored and no identifier will be created.',
+    );
+  }
 
   runWhenPageReady(() => {
     try {

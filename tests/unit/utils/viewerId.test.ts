@@ -43,6 +43,21 @@ describe("createViewerIdStore", () => {
       expect(storage.setItem).toHaveBeenCalledWith(VIEWER_ID_STORAGE_KEY, UUID);
     });
 
+    it("keeps the identifier the storage ends up holding when another tab wrote one in between", () => {
+      const storage = createFakeStorage({ getItem: jest.fn().mockReturnValueOnce(null).mockReturnValue(OTHER) });
+
+      const result = createViewerIdStore(storage, () => UUID).getOrCreate();
+
+      expect(storage.setItem).toHaveBeenCalledWith(VIEWER_ID_STORAGE_KEY, UUID);
+      expect(result).toBe(OTHER);
+    });
+
+    it("keeps its own identifier when the read-back is not a usable UUID", () => {
+      const storage = createFakeStorage({ getItem: jest.fn().mockReturnValue(null) });
+
+      expect(createViewerIdStore(storage, () => UUID).getOrCreate()).toBe(UUID);
+    });
+
     it("reads back a stored identifier without regenerating or writing", () => {
       const storage = createFakeStorage({ getItem: jest.fn().mockReturnValue(OTHER) });
       const randomUUIDImpl = jest.fn();

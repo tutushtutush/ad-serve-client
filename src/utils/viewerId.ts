@@ -48,7 +48,10 @@ export function createViewerIdStore(
         }
         const id = randomUUIDImpl();
         storage.setItem(VIEWER_ID_STORAGE_KEY, id);
-        return id;
+        // Two tabs that start together with nothing stored can both create one; the last write wins. Reading it
+        // back means this tab keeps the winner instead of an identifier that no longer matches the storage.
+        const winner = storage.getItem(VIEWER_ID_STORAGE_KEY);
+        return isViewerId(winner) ? winner : id;
       } catch {
         return undefined;
       }

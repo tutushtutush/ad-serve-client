@@ -72,12 +72,16 @@
 - T010's queued-command cases are covered in `adOrchestrator.viewerId.test.ts` and the `index` test (queued before load, queued withdrawal, a handler that throws), so `queuedCommands.test.ts` is unchanged.
 - The platform's own identifier is never stored by the SDK, which is why a withdrawal only has to remove the SDK's kept one.
 
+- Review of PR #27 found and fixed: two tabs starting together with nothing stored could each keep their own UUID (the store now reads the value back after writing and keeps the winner); a mistyped opt-in value such as `Local` or `true` silently did nothing (one console warning now says the attribute must be exactly `local`; the opt-in rule is unchanged); and the README did not say a single-slot request carries the identifier in the URL's query string (it now does, and advises a random identifier not tied to a person).
+- Known limits left as they are: a withdrawal made in one tab does not reach another tab that already read the kept identifier until that tab reloads (a `storage` event listener could close this); a withdrawal can only be undone by the platform supplying a UUID or by a reload (spec US3 scenario 3); and a queued `["setViewerId", value, extra]` applies `value`, while the direct call with an extra argument is refused (the spec's edge case was about the direct call).
+
 ## Out of scope, for later
 
 - Sending the identifier on click or viewable-impression reports (ad-serve-api does not take it there).
 - A consent-framework integration (reading a consent signal instead of relying on the platform's call).
 - Other storage kinds for the attribute, for example `session`.
 - Turning arbitrary platform identifiers into UUIDs.
+- A `storage` event listener so a withdrawal in one tab stops the others at once.
 
 ## Rejected or reversed approaches
 
