@@ -55,6 +55,10 @@ function buildQueryString(request: AdDecisionRequest): string {
   if (request.sessionId) {
     params.set("sessionId", request.sessionId);
   }
+  // Feature 017: only when the platform allowed an identifier; otherwise the query string is what it was.
+  if (request.viewerId) {
+    params.set("viewerId", request.viewerId);
+  }
   return params.toString();
 }
 
@@ -176,6 +180,7 @@ export function createAdDecisionClient(
         ...(shared.deviceType && { deviceType: shared.deviceType }),
         ...(shared.category && { category: shared.category }),
         ...(shared.sessionId && { sessionId: shared.sessionId }),
+        ...(shared.viewerId && { viewerId: shared.viewerId }),
         dedupe: true,
       };
       const response = await withTimeout(batchTimeoutMs(timeoutMs, requests.length), (signal) =>

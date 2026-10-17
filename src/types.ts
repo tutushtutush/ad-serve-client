@@ -21,6 +21,9 @@ export interface AdDecisionRequest {
   // data-* attributes like the other fields here; the Orchestrator supplies it uniformly for
   // every request, not AdSlotConfig/parseSlotConfig. See adOrchestrator.ts.
   sessionId?: string;
+  // The opaque viewer identifier for ad-serve-api's frequency caps (feature 017): a UUID that outlives the
+  // tab, supplied by the orchestrator only when the platform allowed one. Absent otherwise.
+  viewerId?: string;
 }
 
 // Passed through opaquely from ad-serve-api's own store (see that repo's
@@ -102,6 +105,7 @@ export interface BatchSharedFields {
   deviceType?: string;
   category?: string;
   sessionId?: string;
+  viewerId?: string;
 }
 
 // Just the two fields needed to build a click URL (feature 004) — not the full

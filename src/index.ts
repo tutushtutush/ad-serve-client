@@ -7,6 +7,7 @@ import { createAdRenderer } from "./renderer/adRenderer";
 import { createViewabilityDetector } from "./utils/viewabilityDetector";
 import { getOrCreateSessionId } from "./utils/sessionId";
 import { readViewportWidth } from "./utils/viewportWidth";
+import { createViewerIdStore } from "./utils/viewerId";
 import type { QueuedCommand } from "./types";
 
 declare global {
@@ -21,6 +22,9 @@ declare global {
       refresh?: (root?: Node & ParentNode) => void;
       // Declares the page's categories (feature 010); see specs/010-support-page-level-ad.
       setContext?: (payload: unknown) => void;
+      // Gives the SDK the platform's own viewer identifier (a UUID), or withdraws it with null (feature 017).
+      // Exists once the SDK has started; before that, queue it as ["setViewerId", value].
+      setViewerId?: (...args: unknown[]) => void;
     };
   }
 }
@@ -40,6 +44,19 @@ function getSessionStorageSafely(): Storage | undefined {
   }
 }
 
+// Same reasoning as getSessionStorageSafely above: even reading the property can throw.
+function getLocalStorageSafely(): Storage | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+// Stands in for the value of a setViewerId call made with the wrong number of arguments; it is never a UUID,
+// null or "", so the orchestrator refuses it exactly like any other bad value.
+const MALFORMED_VIEWER_ID_CALL = Symbol("malformed setViewerId call");
+
 function runWhenPageReady(callback: () => void): void {
   // This script loads via <script async>, which can execute before the
   // rest of the page's HTML (including slot elements below it) has been
@@ -55,7 +72,14 @@ function main(): void {
   // Must run synchronously at module-evaluation time: document.currentScript only identifies the
   // currently-executing script and becomes null once this script yields to the event loop (e.g.
   // after an await).
-  const { apiBaseUrl: baseUrl, platformId } = readLoaderTagConfig(document.currentScript);
+  const { apiBaseUrl: baseUrl, platformId, viewerIdStorage, viewerIdStorageUnrecognized } = readLoaderTagConfig(
+    document.currentScript,
+  );
+  if (viewerIdStorageUnrecognized) {
+    console.warn(
+      'ad-serve: data-viewer-id-storage must be exactly "local" to let the SDK keep a viewer identifier. The attribute is ignored and no identifier will be created.',
+    );
+  }
 
   runWhenPageReady(() => {
     try {
@@ -79,6 +103,16 @@ function main(): void {
           ? window.crypto.randomUUID.bind(window.crypto)
           : undefined,
       );
+      // Feature 017: only when the platform opted in, so by default nothing is created, read or stored.
+      // Created lazily, on the first request that needs it, inside the orchestrator.
+      const viewerIdStore = viewerIdStorage
+        ? createViewerIdStore(
+            getLocalStorageSafely(),
+            typeof window.crypto?.randomUUID === "function"
+              ? window.crypto.randomUUID.bind(window.crypto)
+              : undefined,
+          )
+        : undefined;
       const orchestrator = createAdOrchestrator({
         client,
         renderer,
@@ -89,6 +123,7 @@ function main(): void {
         warn: (message) => console.warn(message),
         // Feature 011: the window's width picks an ad type from a slot's data-ad-types.
         getViewportWidth: () => readViewportWidth(window),
+        viewerIdStore,
       });
 
       // Feature 010: `[name, payload]` entries a host page queued before this SDK started (e.g. a
@@ -96,7 +131,7 @@ function main(): void {
       // are applied here, ahead of run(). Plain callbacks keep running after it, below, since they
       // may call refresh(), which needs the initial run and its definition below to exist
       // (research.md Decision 2).
-      const commandHandlers = { setContext: orchestrator.setContext };
+      const commandHandlers = { setContext: orchestrator.setContext, setViewerId: orchestrator.setViewerId };
       for (const queued of window.adServe.q) {
         if (isQueuedCommand(queued)) {
           applyQueuedCommand(queued, commandHandlers);
@@ -112,6 +147,11 @@ function main(): void {
       const adServe = window.adServe;
       adServe.setContext = (payload) => {
         applyQueuedCommand(["setContext", payload], commandHandlers);
+      };
+      // Exactly one argument is the identifier. Anything else (none, or extra ones) is a mistake on the host
+      // page, so it goes through the same refusal as a bad value: one warning, nothing changed.
+      adServe.setViewerId = (...args) => {
+        applyQueuedCommand(["setViewerId", args.length === 1 ? args[0] : MALFORMED_VIEWER_ID_CALL], commandHandlers);
       };
       adServe.refresh = (root) => {
         try {

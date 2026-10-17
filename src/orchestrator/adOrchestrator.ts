@@ -2,6 +2,7 @@ import { asSafeString } from "../utils/asSafeString";
 import { normalizeCategories } from "../utils/normalizeCategories";
 import { groupSlotsForBatch } from "../utils/groupSlotsForBatch";
 import { parseBreakpointList, pickByBreakpoint, type BreakpointEntry } from "../utils/breakpointList";
+import { isViewerId, type ViewerIdStoreLike } from "../utils/viewerId";
 import type { ViewabilityDetectorLike } from "../utils/viewabilityDetector";
 import type { ViewableImpressionReport } from "../client/viewableImpressionClient";
 import type {
@@ -67,6 +68,9 @@ export interface AdOrchestratorDeps {
   platformId?: string;
   // Injected so the missing-platform message is testable (Constitution Principle III).
   warn?: (message: string) => void;
+  // Feature 017: the SDK's own persistent viewer identifier, built by index.ts only when the platform opted
+  // in with data-viewer-id-storage="local". Absent otherwise, so nothing is created, read or stored.
+  viewerIdStore?: ViewerIdStoreLike;
 }
 
 const MISSING_PLATFORM_ID_MESSAGE =
@@ -285,6 +289,7 @@ export function createAdOrchestrator({
   getViewportWidth,
   platformId: platformIdDep,
   warn,
+  viewerIdStore,
 }: AdOrchestratorDeps) {
   const platformId = (platformIdDep ?? "").trim();
   let warnedMissingPlatformId = false;
@@ -342,6 +347,66 @@ export function createAdOrchestrator({
       return slotCategory;
     }
     return pageCategories.length > 0 ? pageCategories.join(",") : undefined;
+  }
+
+  // The viewer identifier for ad-serve-api's frequency caps (feature 017). The platform decides whether one
+  // exists: its own UUID (kept in memory only, never stored by the SDK), or, when it opted in, the one the
+  // SDK keeps in local storage. Read when each request is built, so a call made later applies to every
+  // request after it and leaves earlier ones alone.
+  let platformViewerId: string | undefined;
+  // Set by a withdrawal: the opt-in must not quietly create a new identifier for the rest of this page.
+  let viewerIdWithdrawn = false;
+  // The kept identifier, read or created at most once per page, on the first request that needs it. A failure
+  // is cached too ("unavailable"), so a blocked storage is not retried (and nothing is logged) per request.
+  let keptViewerId: string | undefined | "unavailable";
+  let keptViewerIdResolved = false;
+
+  // The key is left out entirely when there is no identifier, so a request without one is the object it
+  // always was.
+  function viewerIdField(): { viewerId?: string } {
+    const viewerId = currentViewerId();
+    return viewerId === undefined ? {} : { viewerId };
+  }
+
+  function currentViewerId(): string | undefined {
+    try {
+      if (platformViewerId !== undefined) {
+        return platformViewerId;
+      }
+      if (viewerIdWithdrawn || !viewerIdStore) {
+        return undefined;
+      }
+      if (!keptViewerIdResolved) {
+        keptViewerIdResolved = true;
+        keptViewerId = viewerIdStore.getOrCreate() ?? "unavailable";
+      }
+      return keptViewerId === "unavailable" ? undefined : keptViewerId;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // `setViewerId(uuid)` uses the platform's own identifier from now on; `null` or "" withdraws any identifier
+  // and removes the one the SDK kept (a visitor withdrawing consent); anything else is a mistake on the
+  // host page, so it is reported once and changes nothing, never thrown.
+  function setViewerId(value: unknown): void {
+    try {
+      if (value === null || value === "") {
+        platformViewerId = undefined;
+        viewerIdWithdrawn = true;
+        keptViewerIdResolved = false;
+        keptViewerId = undefined;
+        viewerIdStore?.remove();
+        return;
+      }
+      if (isViewerId(value)) {
+        platformViewerId = value;
+        return;
+      }
+      warn?.("[ad-serve] setViewerId ignored: the viewer identifier must be a UUID (or null to withdraw it).");
+    } catch {
+      // A broken store or logger must never break the host page (Constitution Principle V).
+    }
   }
 
   // Wrapped, not called directly — caught in review of #10: unlike every other schedule-driven
@@ -488,6 +553,7 @@ export function createAdOrchestrator({
         ...slot.config,
         category: resolveCategory(slot.config.category),
         sessionId,
+        ...viewerIdField(),
       });
       applyResult(slot, result);
     } catch {
@@ -555,6 +621,7 @@ export function createAdOrchestrator({
           deviceType: first.config.deviceType,
           category: sharedCategory,
           sessionId,
+          ...viewerIdField(),
         })) ?? null;
     } catch {
       results = null;
@@ -757,5 +824,5 @@ export function createAdOrchestrator({
     }
   }
 
-  return { run, setContext };
+  return { run, setContext, setViewerId };
 }
