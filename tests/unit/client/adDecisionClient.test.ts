@@ -61,6 +61,35 @@ describe("createAdDecisionClient", () => {
     );
   });
 
+  describe("viewer identifier (017)", () => {
+    const VIEWER = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
+
+    it("adds viewerId after the other parameters when an identifier is in effect", async () => {
+      const fetchImpl: FetchLike = jest.fn(async () => jsonResponse(true, { ad: null }));
+      const client = createAdDecisionClient(fetchImpl, baseUrl);
+
+      await client.requestAd({
+        platformId: "plat-1",
+        adTypeId: "banner",
+        sessionId: "44444444-4444-4444-4444-444444444444",
+        viewerId: VIEWER,
+      });
+
+      expect((fetchImpl as jest.Mock).mock.calls[0][0]).toBe(
+        `${baseUrl}/ads?platformId=plat-1&adTypeId=banner&sessionId=44444444-4444-4444-4444-444444444444&viewerId=${VIEWER}`,
+      );
+    });
+
+    it.each([undefined, ""])("leaves the query string exactly as before when viewerId is %p", async (viewerId) => {
+      const fetchImpl: FetchLike = jest.fn(async () => jsonResponse(true, { ad: null }));
+      const client = createAdDecisionClient(fetchImpl, baseUrl);
+
+      await client.requestAd({ platformId: "plat-1", adTypeId: "banner", category: "IAB1-6", viewerId });
+
+      expect((fetchImpl as jest.Mock).mock.calls[0][0]).toBe(`${baseUrl}/ads?platformId=plat-1&adTypeId=banner&category=IAB1-6`);
+    });
+  });
+
   it("returns filled when ad-serve-api returns a winning ad", async () => {
     const fetchImpl: FetchLike = jest.fn(async () =>
       jsonResponse(true, { ad: { creative, width: 300, height: 250 } }),
@@ -264,6 +293,31 @@ describe("createAdDecisionClient.requestAdBatch (012)", () => {
       sessionId: "session-1",
       dedupe: true,
     });
+  });
+
+  it("sends the viewer identifier once, with the shared fields (017)", async () => {
+    const { fetchImpl, client } = batchClient(jsonResponse(true, { results: [] }));
+
+    await client.requestAdBatch(requests, { sessionId: "session-1", viewerId: "3fa85f64-5717-4562-b3fc-2c963f66afa6" });
+
+    const init = (fetchImpl as jest.Mock).mock.calls[0][1];
+    expect(JSON.parse(init.body)).toEqual({
+      placements: requests,
+      sessionId: "session-1",
+      viewerId: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      dedupe: true,
+    });
+    expect(init.body.match(/viewerId/g)).toHaveLength(1);
+  });
+
+  it("leaves the whole body exactly as before when there is no identifier (017)", async () => {
+    const { fetchImpl, client } = batchClient(jsonResponse(true, { results: [] }));
+
+    await client.requestAdBatch(requests, { country: "US", sessionId: "session-1", viewerId: undefined });
+
+    expect((fetchImpl as jest.Mock).mock.calls[0][1].body).toBe(
+      JSON.stringify({ placements: requests, country: "US", sessionId: "session-1", dedupe: true }),
+    );
   });
 
   it("omits absent shared fields and never sends dedupeFallback", async () => {
