@@ -10,3 +10,7 @@ Decisions, alternatives and the before/after measurements are in adconfig `specs
 The served markup (`srcdoc`) in an iframe of the ad's own size in headless Chromium, a full ad (logo, "Big Sale", "Buy Now") and one with a long headline and a long button label, at all seven sizes: nothing is cut off at any of them. 468x60: no logo, one headline line (8 to 26) and the button (30 to 52). 320x50: no logo, no button, one headline line at the bottom (24 to 42). 300x250, 970x250, 300x600, 728x90 and 320x100 show the same positions as before the change (button bottoms 242, 242, 592, 82 and 92). The golden file confirms the markup of those sizes is byte-identical.
 
 (adconfig's own check of its preview used a hand-written stylesheet without `justify-end`, so it showed the headline at the top at 320x50; in the real app the Tailwind class puts it at the bottom, as here.)
+
+## Release (T009, 2026-10-22)
+
+Merged #32, then #33 bumped `package.json` to 1.11.0 (the precedent of v1.10.0 is to bump in a PR and tag the merge commit), and `v1.11.0` was tagged on `03869c3`. ad-serve-api #101 bumped its pin to that tag; after its deploy the served `/ad-serve-client.js` on ad-serve-api-test contained the short-classic markup (20,718 to 21,499 bytes), and the Classic ads on EventPulse's test site at 300x250 and 728x90 were unchanged. No 468x60 or 320x50 placement exists on the test platform, so those two sizes were not seen live (see adconfig spec 109 research).
