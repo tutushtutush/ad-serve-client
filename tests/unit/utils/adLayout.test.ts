@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
-import { AD_LAYOUTS, layoutGeometry, normalizeLayout, type AdLayout } from "../../../src/utils/adLayout";
+import { AD_LAYOUTS, classicFit, layoutGeometry, normalizeLayout, type AdLayout } from "../../../src/utils/adLayout";
 
 describe("normalizeLayout", () => {
   it.each(AD_LAYOUTS)("keeps %s", (name) => {
@@ -122,5 +122,63 @@ describe("the shared contract's arrangement table", () => {
     expect(geometry.showLogo ? "yes" : "no").toBe(row.logo);
     expect(geometry.showCta ? "yes" : "no").toBe(row.button);
     expect(String(geometry.headlineLines)).toBe(row.lines);
+  });
+});
+
+describe("classicFit (spec 019)", () => {
+  it.each([250, 600, 100, 90, 82])("draws classic as before at a height of %i", (height) => {
+    expect(classicFit(height)).toBeNull();
+  });
+
+  it("drops the logo but keeps the button and one line of headline at 60", () => {
+    expect(classicFit(60)).toEqual({ showLogo: false, showCta: true, headlineLines: 1 });
+  });
+
+  it("drops the logo and the button at 50 and keeps one line of headline", () => {
+    expect(classicFit(50)).toEqual({ showLogo: false, showCta: false, headlineLines: 1 });
+  });
+
+  it("changes at a height of 82, the first with room for the logo, headline and button", () => {
+    expect(classicFit(81)).not.toBeNull();
+    expect(classicFit(82)).toBeNull();
+  });
+
+  it.each([0, -5, NaN, Infinity])("draws classic as before for a size of %s", (height) => {
+    expect(classicFit(height)).toBeNull();
+  });
+
+  it("agrees with the layouts about what fits in the same text box height", () => {
+    const geometry = layoutGeometry("text-only", 468, 60)!;
+    expect(classicFit(60)).toEqual({ showLogo: geometry.showLogo, showCta: geometry.showCta, headlineLines: geometry.headlineLines });
+  });
+});
+
+// The Classic table of the shared contract (a copy of adconfig's spec 109 file) is the source of truth for both renderers;
+// columns are read by name because the table has one more column than the arrangement table's.
+describe("the shared contract's classic table", () => {
+  const contract = readFileSync(join(__dirname, "../../../specs/019-classic-fit-short/contracts/classic-fit.md"), "utf8");
+  const lines = contract.split("\n").filter((line) => line.startsWith("|"));
+  const header = lines[0].split("|").map((cell) => cell.trim());
+  const rows = lines
+    .slice(2)
+    .map((line) => line.split("|").map((cell) => cell.trim()))
+    .filter((cells) => cells[1] === "classic" && /^\d+x\d+$/.test(cells[2]))
+    .map((cells) => Object.fromEntries(header.map((name, i) => [name, cells[i]])) as Record<string, string>);
+
+  it("has a row for each of the seven standard sizes", () => {
+    expect(rows.map((row) => row["Size"])).toEqual(["300x250", "970x250", "300x600", "728x90", "320x100", "468x60", "320x50"]);
+  });
+
+  it.each(rows.map((row) => [row["Size"], row] as const))("classic at %s", (size, row) => {
+    const height = Number(size.split("x")[1]);
+    const fit = classicFit(height);
+
+    expect(fit === null ? "yes" : "no").toBe(row["As before"]);
+    expect(String(height - 16)).toBe(row["inner"]);
+    if (fit) {
+      expect(fit.showLogo ? "yes" : "no").toBe(row["Logo"]);
+      expect(fit.showCta ? "yes" : "no").toBe(row["Button"]);
+      expect(String(fit.headlineLines)).toBe(row["Headline lines"]);
+    }
   });
 });
