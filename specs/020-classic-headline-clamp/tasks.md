@@ -10,4 +10,4 @@
 - [x] T006 Regenerate `classicMarkup.golden.json` in a commit of its own (all entries gain the same two additions)
 - [x] T007 Real-browser check of the SDK markup against the saved geometry: ordinary ads identical, a 40-line headline with a 150-character label inside the ad at five sizes and four fonts; record in `research.md`
 - [x] T008 Bump `package.json` and the lock to 1.12.0; `npx tsc --noEmit`, `npx eslint .`, `npx jest`, `npm run build`; README line; open the PR
-- [ ] T009 After merge: tag `v1.12.0` on the merge commit; adconfig spec 110 then bumps ad-serve-api's pin and checks the test site
+- [x] T009 After merge: tag `v1.12.0` on the merge commit; adconfig spec 110 then bumps ad-serve-api's pin and checks the test site
