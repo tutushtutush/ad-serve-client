@@ -41,7 +41,7 @@ This is the first of three releases: ad-serve-client, then ad-serve-api, then ad
 
 - [X] T011 Bump `package.json` to 1.10.0 and add a short "Ad layouts" note to `README.md`: nothing changes for a platform, the layout is chosen in adconfig and served by ad-serve-api.
 - [ ] T012 Run `npm test`, `npm run lint`, `npx tsc --noEmit` and `npm run build`; confirm [contracts/resolved-render.md](contracts/resolved-render.md) is byte-identical to adconfig's copy and to ad-serve-api's when that exists.
-- [ ] T013 Open the PR (description ends with the Claude Code line from the project's attribution rule); merge only on the owner's word; after release confirm on the test site that served ads are unchanged (SC-004).
+- [X] T013 Open the PR (description ends with the Claude Code line from the project's attribution rule); merge only on the owner's word; after release confirm on the test site that served ads are unchanged (SC-004). Done: #29 merged as `0ff5dfb`, tagged `v1.10.0`; ad-serve-api serves the SDK from a pin, so its pin was bumped (ad-serve-api #98) before it reached the test site. Confirmed 2026-10-22: the test service serves the new SDK, ads with no layout are unchanged, and a test ad set to Image left was drawn by it on the EventPulse test site, then set back (adconfig spec 101 research, T021).
 
 ## Dependencies
 

@@ -50,3 +50,7 @@ Applied: the button and headline now have fixed line heights in a layout (button
 Also applied: the layout path and the classic path now share the one gradient constant (the golden test pins the classic string).
 
 Not changed, with reasons: the overlay scrim with no image (a recorded decision in adconfig spec 101); a very small portrait ad such as 50x90 (not a standard ad size); the cross-repo copies of the numbers (the accepted trade-off of plan R3, held together by the contract table that each repo's tests parse).
+
+## Release and test-environment check (2026-10-22)
+
+Merged as `0ff5dfb` and tagged `v1.10.0` (annotated, like the earlier tags). **Releasing this SDK needs a second step:** ad-serve-api serves it from a pin in its `package.json`, so a pin-bump PR there (#98, as #71 did for v1.7.0) is what puts it in front of pages. After that deployed, the test service's `/ad-serve-client.js` held the layout code, ads without a layout drew as before, and a test ad set to Image left was drawn by the deployed SDK on the EventPulse test site (image box and text box each 50% wide, as in the contract), then set back to Classic. Details in adconfig `specs/101-ad-layout-presets/research.md`.
