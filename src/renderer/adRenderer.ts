@@ -1,7 +1,7 @@
 import { escapeForMarkup } from "../utils/escapeForMarkup";
 import { asSafeString } from "../utils/asSafeString";
 import { buildTrackingUrl } from "../utils/buildTrackingUrl";
-import { layoutGeometry, normalizeLayout, type LayoutBox, type LayoutGeometry } from "../utils/adLayout";
+import { classicFit, layoutGeometry, normalizeLayout, type LayoutBox, type LayoutGeometry } from "../utils/adLayout";
 import type { AdCandidate, PlacementIdentity, ResolvedAdCreativeRender } from "../types";
 
 function asSafeBoolean(value: unknown, fallback: boolean): boolean {
@@ -314,6 +314,25 @@ function buildCreativeMarkup(
       headlineFont,
       cta: buildCta(FIXED_HEIGHT_CTA_STYLE),
     });
+  }
+
+  // Too short for the whole classic stack (spec 019): the same wrapper, but the logo and button are left out
+  // when they do not fit and the headline is cut to the lines that do, as in the layouts. Taller ads use the
+  // template below, which is unchanged.
+  const short = normalizeLayout(r.layout) === "classic" ? classicFit(ad.height) : null;
+  if (short) {
+    const shortHeadline = headline
+      ? `<span style="font-size:14px;font-weight:700;color:${headlineColor};font-family:${headlineFont};line-height:18px;${clampedTextStyle(short.headlineLines)}">${headline}</span>`
+      : "";
+    return `<!DOCTYPE html><html><body style="margin:0;">
+    <${wrapper.tag} ${wrapper.attrs}${ariaAttr} style="position:absolute;inset:0;display:flex;flex-direction:column;justify-content:flex-end;box-sizing:border-box;padding:8px;overflow:hidden;text-decoration:none;background:${GRADIENT};">
+      ${backgroundLayer}
+      <div style="position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;">
+        ${shortHeadline}
+        ${short.showCta ? buildCta(FIXED_HEIGHT_CTA_STYLE) : ""}
+      </div>
+    </${wrapper.tag}>
+  </body></html>`;
   }
 
   // Layout mirrors adconfig's own preview (research.md): background layer,

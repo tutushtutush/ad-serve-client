@@ -85,19 +85,35 @@ export function layoutGeometry(layout: AdLayout, adWidth: number, adHeight: numb
       text = FULL;
   }
 
-  const inner = (adHeight * text.height) / 100 - TEXT_BOX_PADDING;
-  const showCta = inner >= HEADLINE_LINE + GAP + CTA_HEIGHT;
-  const showLogo = showCta && inner >= LOGO_HEIGHT + GAP + HEADLINE_LINE + GAP + CTA_HEIGHT;
-  const spaceForHeadline = inner - (showLogo ? LOGO_HEIGHT + GAP : 0) - (showCta ? CTA_HEIGHT + GAP : 0);
-  const headlineLines = Math.min(3, Math.max(1, Math.floor(spaceForHeadline / HEADLINE_LINE))) as 1 | 2 | 3;
   return {
     image,
     text,
     centered: arrangement === "overlay" || arrangement === "text-only",
     scrim: arrangement === "overlay",
     showPlaceholder: arrangement === "image-left" || arrangement === "image-top",
-    showLogo,
-    showCta,
-    headlineLines,
+    ...fitText((adHeight * text.height) / 100 - TEXT_BOX_PADDING),
   };
+}
+
+type TextFit = Pick<LayoutGeometry, "showLogo" | "showCta" | "headlineLines">;
+
+// What a text box of this inner height (padding already taken off) can hold: the button when there is room
+// for one line of headline above it, the logo when there is room for everything, and the rest for headline.
+function fitText(inner: number): TextFit {
+  const showCta = inner >= HEADLINE_LINE + GAP + CTA_HEIGHT;
+  const showLogo = showCta && inner >= LOGO_HEIGHT + GAP + HEADLINE_LINE + GAP + CTA_HEIGHT;
+  const spaceForHeadline = inner - (showLogo ? LOGO_HEIGHT + GAP : 0) - (showCta ? CTA_HEIGHT + GAP : 0);
+  const headlineLines = Math.min(3, Math.max(1, Math.floor(spaceForHeadline / HEADLINE_LINE))) as 1 | 2 | 3;
+  return { showLogo, showCta, headlineLines };
+}
+
+/**
+ * How classic is drawn on a short ad (spec 019, from adconfig spec 109), or null when it holds everything and
+ * is drawn exactly as before. Decided by the ad's height alone, so the preview and the served ad always agree
+ * and an ad that already fits keeps its markup byte for byte.
+ */
+export function classicFit(adHeight: number): TextFit | null {
+  if (!isPositiveSize(adHeight)) return null;
+  const fit = fitText(adHeight - TEXT_BOX_PADDING);
+  return fit.showLogo ? null : fit;
 }

@@ -846,4 +846,53 @@ describe("createAdRenderer layouts (spec 018)", () => {
       expect(renderAndGetSrcdoc(ad)).toBe(renderAndGetSrcdoc(adAt(0, 0, full)));
     });
   });
+  describe("classic on a short ad (spec 019)", () => {
+    const classic = { ...full, layout: "classic" };
+
+    it("drops the logo and keeps the button and one line of headline at 468x60", () => {
+      const doc = drawn(adAt(468, 60, classic));
+      const headline = doc.querySelector("span:not([role=button])") as HTMLElement;
+      const button = doc.querySelector("[role=button]") as HTMLElement;
+
+      expect(doc.querySelector(`img[src="${LOGO}"]`)).toBeNull();
+      expect(headline.style.lineHeight).toBe("18px");
+      expect(headline.style.webkitLineClamp).toBe("1");
+      expect(button.style.whiteSpace).toBe("nowrap");
+      expect(button.style.textOverflow).toBe("ellipsis");
+      expect(button.style.lineHeight).toBe("16px");
+    });
+
+    it("drops the logo and the button at 320x50 and keeps one line of headline", () => {
+      const doc = drawn(adAt(320, 50, classic));
+
+      expect(doc.querySelector(`img[src="${LOGO}"]`)).toBeNull();
+      expect(doc.querySelector("[role=button]")).toBeNull();
+      expect(doc.body.textContent).toContain("Summer Sale");
+    });
+
+    it("keeps the classic wrapper, with the text at the bottom", () => {
+      const markup = renderAndGetSrcdoc(adAt(320, 50, classic));
+
+      expect(markup).toContain("flex-direction:column;justify-content:flex-end;box-sizing:border-box;padding:8px;overflow:hidden");
+      expect(markup).toContain(`<img src="${BG}"`);
+    });
+
+    it("draws an ad with no logo, headline or button without errors", () => {
+      for (const height of [60, 50]) {
+        expect(() => renderAndGetSrcdoc(adAt(468, height, { headlineText: "", ctaText: "", layout: "classic" }))).not.toThrow();
+      }
+    });
+
+    it.each(["", "IMAGE-LEFT", "diagonal", 5, null])("an unknown layout %j on a short ad is drawn as classic", (layout) => {
+      expect(renderAndGetSrcdoc(adAt(320, 50, { ...full, layout }))).toBe(renderAndGetSrcdoc(adAt(320, 50, classic)));
+    });
+
+    it("leaves the other layouts alone: image-left at 320x50 is not the short classic", () => {
+      expect(renderAndGetSrcdoc(adAt(320, 50, { ...full, layout: "image-left" }))).not.toContain("justify-content:flex-end");
+    });
+
+    it.each([[300, 250], [970, 250], [300, 600], [728, 90], [320, 100]])("classic at %ix%i keeps the unchanged markup", (width, height) => {
+      expect(renderAndGetSrcdoc(adAt(width, height, classic))).toContain("justify-content:space-between");
+    });
+  });
 });
