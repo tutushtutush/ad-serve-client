@@ -43,6 +43,9 @@ export const CLASSIC_CASES: Record<string, () => AdCandidate> = {
   }),
   "wide size": () => ({ ...makeAdWithResolvedRender(), width: 970, height: 250 }),
   "tall size": () => ({ ...makeAdWithResolvedRender(), width: 300, height: 600 }),
+  // Sizes that are short but still hold the whole classic stack (spec 019): they must not move.
+  "leaderboard size": () => ({ ...makeAdWithResolvedRender({ hasLogoImage: true, logoImageDataUrl: LOGO }), width: 728, height: 90 }),
+  "large mobile banner size": () => ({ ...makeAdWithResolvedRender({ hasLogoImage: true, logoImageDataUrl: LOGO }), width: 320, height: 100 }),
   "markup in text": () => makeAdWithResolvedRender({ headlineText: `<b>"x"</b> & 'y'`, ariaLabel: `"><script>` }),
   ...Object.fromEntries(
     POSITIONS.map((position) => [
