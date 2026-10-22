@@ -145,6 +145,11 @@ function clampedTextStyle(lines: number): string {
   return `display:-webkit-box;-webkit-line-clamp:${lines};-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;min-width:0;max-width:100%;`;
 }
 
+// The geometry counts the button as 22px tall and the headline line as 18px, so in a layout the button is
+// one line of 16px (plus its 3px padding) that is cut with an ellipsis, and the headline line is 18px.
+const FIXED_HEIGHT_CTA_STYLE =
+  "line-height:16px;max-width:100%;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+
 // Everything below is already escaped or computed here; the layout name itself never reaches this
 // function, only the numbers and flags its geometry produced (spec 018 FR-005).
 interface LayoutParts {
@@ -185,7 +190,7 @@ function buildLayoutMarkup(parts: LayoutParts): string {
   const textAlign = geometry.centered ? "center" : "left";
   const scrim = geometry.scrim ? "background-color:rgba(0,0,0,0.45);" : "";
   const headline = parts.headline
-    ? `<span style="font-size:14px;font-weight:700;color:${parts.headlineColor};font-family:${parts.headlineFont};${clampedTextStyle(geometry.headlineLines)}">${parts.headline}</span>`
+    ? `<span style="font-size:14px;font-weight:700;color:${parts.headlineColor};font-family:${parts.headlineFont};line-height:18px;${clampedTextStyle(geometry.headlineLines)}">${parts.headline}</span>`
     : "";
   const textBox = `<div style="position:absolute;box-sizing:border-box;${percentBox(geometry.text)}display:flex;flex-direction:column;justify-content:center;align-items:${align};text-align:${textAlign};gap:4px;padding:8px;overflow:hidden;${scrim}">
         ${geometry.showLogo ? parts.logo : ""}
@@ -232,9 +237,11 @@ function buildCreativeMarkup(
   // for the headline, which has no background and so stayed harmless when
   // empty.
   const ctaBackground = asSafeCssColor(r.ctaBackgroundColor, "#ffffff");
-  const cta = ctaText
-    ? `<span role="button" style="border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;color:${ctaColor};background-color:${ctaBackground};font-family:${ctaFont};">${ctaText}</span>`
-    : "";
+  const buildCta = (extraStyle: string) =>
+    ctaText
+      ? `<span role="button" style="border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;color:${ctaColor};background-color:${ctaBackground};font-family:${ctaFont};${extraStyle}">${ctaText}</span>`
+      : "";
+  const cta = buildCta("");
 
   const hasLogoImage = hasResolvedImage(r.hasLogoImage, r.logoImageDataUrl);
   const logoBackgroundEnabled = asSafeBoolean(r.logoBackgroundEnabled, true);
@@ -305,7 +312,7 @@ function buildCreativeMarkup(
       headline,
       headlineColor,
       headlineFont,
-      cta,
+      cta: buildCta(FIXED_HEIGHT_CTA_STYLE),
     });
   }
 
@@ -323,7 +330,7 @@ function buildCreativeMarkup(
   // (and silently break again if a <head> or extra wrapper layer is ever
   // inserted between them and here).
   return `<!DOCTYPE html><html><body style="margin:0;">
-    <${wrapper.tag} ${wrapper.attrs}${ariaAttr} style="position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;padding:8px;overflow:hidden;text-decoration:none;background:linear-gradient(135deg,#7dd3fc,#0284c7);">
+    <${wrapper.tag} ${wrapper.attrs}${ariaAttr} style="position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;padding:8px;overflow:hidden;text-decoration:none;background:${GRADIENT};">
       ${backgroundLayer}
       <div style="position:relative;display:flex;align-items:flex-start;">${logo}</div>
       <div style="position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;">

@@ -783,6 +783,22 @@ describe("createAdRenderer layouts (spec 018)", () => {
       },
     );
 
+    it("keeps the button to one line and the headline to 18px lines, so the fit estimate holds", () => {
+      const doc = drawn(adAt(300, 250, { ...full, layout: "image-left", ctaText: "Download our free app today" }));
+
+      const button = doc.querySelector("[role=button]")?.getAttribute("style") ?? "";
+      expect(button).toContain("white-space:nowrap;");
+      expect(button).toContain("text-overflow:ellipsis;");
+      expect(button).toContain("line-height:16px;");
+      expect(doc.querySelector("span")?.getAttribute("style")).toContain("line-height:18px;");
+    });
+
+    it("leaves the classic button as it was", () => {
+      const markup = renderAndGetSrcdoc(makeAdWithResolvedRender({ ctaText: "Download our free app today" }));
+
+      expect(markup).not.toContain("white-space:nowrap");
+    });
+
     it("draws image-top side by side on a short ad", () => {
       const doc = drawn(adAt(468, 60, { ...full, layout: "image-top" }));
 

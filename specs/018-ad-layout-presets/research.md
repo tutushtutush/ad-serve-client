@@ -42,3 +42,11 @@ Headless Chromium against the real built SDK (`dist/ad-serve-client.js`, version
 ## Review fixes (2026-10-21, after the review of the adconfig PR)
 
 The first version hid the logo and button by fixed text-box heights (80px and 24px) that ignored the padding, the headline and the gap, so on short ad types (728x90, 468x60, 320x50) the headline was clipped or missing; the earlier browser checks only covered 300x250, 970x250 and 300x600. Reversed and replaced by thresholds computed from the content heights, a per-box headline line clamp (1 to 3 lines), `overflow:hidden` on the text box, and a rule that an ad shorter than 100px draws `image-top` side by side. The contract now carries a 28-row table (every layout at seven sizes, including those three) that each repo's tests parse and assert. Re-checked in a real browser at 728x90, 468x60 and 320x50 and again at the standard sizes: headlines end in an ellipsis and nothing is clipped. The classic layout is unchanged by design, so it still clips at 320x50 as it did before this feature.
+
+## Second review (2026-10-21)
+
+Applied: the button and headline now have fixed line heights in a layout (button one line of 16px plus 3px padding, cut with an ellipsis; headline 18px), so the fit heights are exact instead of an estimate of each font's own line height, and a long button no longer wraps and pushes the logo and headline out of the box. The classic path is untouched (a test checks its button still wraps as before). The contract now says a height of exactly 100px is not short, notes that a specs-only change runs no checks in adconfig, and the committed `.specify/feature.json` is back to the pretty-printed format.
+
+Also applied: the layout path and the classic path now share the one gradient constant (the golden test pins the classic string).
+
+Not changed, with reasons: the overlay scrim with no image (a recorded decision in adconfig spec 101); a very small portrait ad such as 50x90 (not a standard ad size); the cross-repo copies of the numbers (the accepted trade-off of plan R3, held together by the contract table that each repo's tests parse).
