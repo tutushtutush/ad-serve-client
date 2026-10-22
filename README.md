@@ -98,7 +98,7 @@ The identifier goes on ad requests only (not on click or viewable-impression rep
 
 An advertiser can choose how an ad is arranged (image beside the text, image above it, text over the image, or text only). The choice is made in adconfig and carried in the ad that ad-serve-api sends, so **nothing changes for a platform embedding this SDK**: there is no new attribute or call. An ad with no choice, or one this version does not know, is drawn as it always was.
 
-On an ad too short to hold the logo, headline and button (under 82px tall: 468x60 and 320x50 among the standard sizes) the classic arrangement leaves out the logo, and the button when there is no room, and cuts a long headline with an ellipsis, so nothing is cut off. Taller ads are drawn exactly as before.
+On an ad too short to hold the logo, headline and button (under 82px tall: 468x60 and 320x50 among the standard sizes) the classic arrangement leaves out the logo, and the button when there is no room, and cuts a long headline with an ellipsis, so nothing is cut off. Taller ads are drawn as before too, except that a headline too long for the room is cut to the lines that fit (no cap at three) and ends in an ellipsis, and a long button label stays on one line, so a very long headline no longer pushes the logo or button out of the ad.
 
 ## Development
 

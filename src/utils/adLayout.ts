@@ -117,3 +117,23 @@ export function classicFit(adHeight: number): TextFit | null {
   const fit = fitText(adHeight - TEXT_BOX_PADDING);
   return fit.showLogo ? null : fit;
 }
+
+// Classic sets no line height, so in the SDK's iframe (no base style, line height "normal") a headline line and
+// the button are as tall as the browser's default font makes them: 16 to 17px and 18 to 19px in the fonts measured
+// here, but about 19px and 21px in the default serif of Android (Noto Serif) and the Windows UI font. 20 and 21
+// keep a headline inside the ad on those too; an ad with shorter lines is cut a line early only when its headline
+// is already extremely long (spec 020 review, adconfig spec 110 research D3).
+const CLASSIC_HEADLINE_LINE = 20;
+const CLASSIC_BUTTON_HEIGHT = 21;
+
+/**
+ * How many headline lines classic may draw on an ad of 82px and over (spec 020), or null when it draws no limit
+ * (a short ad has the rule of spec 019, and a missing size keeps today's markup). There is no cap at three: the
+ * limit is only the room left after the logo and the button, so a headline that fits today is still shown whole.
+ */
+export function classicHeadlineLines(adHeight: number, parts: { hasLogo: boolean; hasCta: boolean }): number | null {
+  if (!isPositiveSize(adHeight) || classicFit(adHeight)) return null;
+  const room =
+    adHeight - TEXT_BOX_PADDING - (parts.hasLogo ? LOGO_HEIGHT : 0) - (parts.hasCta ? GAP + CLASSIC_BUTTON_HEIGHT : 0);
+  return Math.max(1, Math.floor(room / CLASSIC_HEADLINE_LINE));
+}

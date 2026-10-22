@@ -1,7 +1,7 @@
 import { escapeForMarkup } from "../utils/escapeForMarkup";
 import { asSafeString } from "../utils/asSafeString";
 import { buildTrackingUrl } from "../utils/buildTrackingUrl";
-import { classicFit, layoutGeometry, normalizeLayout, type LayoutBox, type LayoutGeometry } from "../utils/adLayout";
+import { classicFit, classicHeadlineLines, layoutGeometry, normalizeLayout, type LayoutBox, type LayoutGeometry } from "../utils/adLayout";
 import type { AdCandidate, PlacementIdentity, ResolvedAdCreativeRender } from "../types";
 
 function asSafeBoolean(value: unknown, fallback: boolean): boolean {
@@ -147,8 +147,8 @@ function clampedTextStyle(lines: number): string {
 
 // The geometry counts the button as 22px tall and the headline line as 18px, so in a layout the button is
 // one line of 16px (plus its 3px padding) that is cut with an ellipsis, and the headline line is 18px.
-const FIXED_HEIGHT_CTA_STYLE =
-  "line-height:16px;max-width:100%;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+const ONE_LINE_CTA_STYLE = "max-width:100%;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+const FIXED_HEIGHT_CTA_STYLE = `line-height:16px;${ONE_LINE_CTA_STYLE}`;
 
 // Everything below is already escaped or computed here; the layout name itself never reaches this
 // function, only the numbers and flags its geometry produced (spec 018 FR-005).
@@ -241,9 +241,11 @@ function buildCreativeMarkup(
     ctaText
       ? `<span role="button" style="border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;color:${ctaColor};background-color:${ctaBackground};font-family:${ctaFont};${extraStyle}">${ctaText}</span>`
       : "";
-  const cta = buildCta("");
-
   const hasLogoImage = hasResolvedImage(r.hasLogoImage, r.logoImageDataUrl);
+  // A classic headline that does not fit is cut to the lines that do and a long button label stays on one line
+  // (spec 020); null keeps the markup as it was.
+  const classicLines = classicHeadlineLines(ad.height, { hasLogo: hasLogoImage, hasCta: Boolean(ctaText) });
+  const cta = buildCta(classicLines ? ONE_LINE_CTA_STYLE : "");
   const logoBackgroundEnabled = asSafeBoolean(r.logoBackgroundEnabled, true);
   const logoBackgroundColor = asSafeCssColor(r.logoBackgroundColor, "#ffffff");
   const logo = hasLogoImage
@@ -353,7 +355,7 @@ function buildCreativeMarkup(
       ${backgroundLayer}
       <div style="position:relative;display:flex;align-items:flex-start;">${logo}</div>
       <div style="position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;">
-        <span style="font-size:14px;font-weight:700;color:${headlineColor};font-family:${headlineFont};">${headline}</span>
+        <span style="font-size:14px;font-weight:700;color:${headlineColor};font-family:${headlineFont};${classicLines ? clampedTextStyle(classicLines) : ""}">${headline}</span>
         ${cta}
       </div>
     </${wrapper.tag}>

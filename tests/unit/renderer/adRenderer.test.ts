@@ -678,6 +678,64 @@ describe("createAdRenderer layouts (spec 018)", () => {
     });
   });
 
+  // Spec 020 gives every classic ad of 82px and over a headline line clamp and a one-line button. The golden file
+  // changes because of it; this shows it changes by nothing else: take the added styles out of the new markup and
+  // what is left is exactly the markup of the release before spec 020.
+  describe("classic markup differs from the release before spec 020 only by the added styles", () => {
+    const pre110 = JSON.parse(
+      readFileSync(join(__dirname, "../fixtures/classicMarkup.pre110.golden.json"), "utf8"),
+    ) as Record<string, string>;
+    const ADDED_TO_HEADLINE = /display:-webkit-box;-webkit-line-clamp:\d+;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;min-width:0;max-width:100%;/g;
+    const ADDED_TO_BUTTON = /max-width:100%;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;/g;
+
+    it.each(Object.keys(CLASSIC_CASES))("%s", (name) => {
+      const markup = renderAndGetSrcdoc(CLASSIC_CASES[name](), API_BASE_URL, PLACEMENT, "sess-1");
+
+      expect(markup.replace(ADDED_TO_HEADLINE, "").replace(ADDED_TO_BUTTON, "")).toBe(pre110[name]);
+    });
+  });
+
+  describe("classic headline limit on ads of 82px and over (spec 020)", () => {
+    const LONG = "word ".repeat(80);
+    const long = { ...full, headlineText: LONG, ctaText: "Buy Now", layout: "classic" };
+
+    it.each([
+      [300, 250, 9],
+      [970, 250, 9],
+      [300, 600, 27],
+      [728, 90, 1],
+      [320, 100, 2],
+    ])("clamps a long headline at %ix%i to %i lines", (width, height, lines) => {
+      const markup = renderAndGetSrcdoc(adAt(width, height, long));
+
+      expect(markup).toContain(`-webkit-line-clamp:${lines};`);
+      expect(markup).toContain("overflow-wrap:anywhere");
+    });
+
+    it("gives the room of a missing logo or button to the headline", () => {
+      expect(renderAndGetSrcdoc(adAt(300, 250, { ...long, hasLogoImage: false }))).toContain("-webkit-line-clamp:10;");
+      expect(renderAndGetSrcdoc(adAt(300, 250, { ...long, ctaText: "" }))).toContain("-webkit-line-clamp:10;");
+      expect(renderAndGetSrcdoc(adAt(320, 100, { ...long, hasLogoImage: false, ctaText: "" }))).toContain("-webkit-line-clamp:4;");
+    });
+
+    it("does not give the headline a line height of its own", () => {
+      const doc = drawn(adAt(300, 250, long));
+
+      expect((doc.querySelector("span:not([role=button])") as HTMLElement).style.lineHeight).toBe("");
+    });
+
+    it.each([[0], [-5], [NaN]])("draws an ad of height %s as before, with no clamp", (height) => {
+      const markup = renderAndGetSrcdoc(adAt(300, height, long));
+
+      expect(markup).not.toContain("-webkit-line-clamp");
+    });
+
+    it("leaves a short ad to the rule of spec 019 and the other layouts alone", () => {
+      expect(renderAndGetSrcdoc(adAt(468, 60, long))).toContain("-webkit-line-clamp:1;");
+      expect(renderAndGetSrcdoc(adAt(300, 250, { ...long, layout: "overlay" }))).not.toContain("-webkit-line-clamp:9;");
+    });
+  });
+
   describe("hostile values (FR-005, FR-011)", () => {
     const hostile: unknown[] = [
       '"><script>alert(1)</script>',
@@ -793,10 +851,11 @@ describe("createAdRenderer layouts (spec 018)", () => {
       expect(doc.querySelector("span")?.getAttribute("style")).toContain("line-height:18px;");
     });
 
-    it("leaves the classic button as it was", () => {
+    it("gives the classic button the one-line limit but no fixed line height (spec 020)", () => {
       const markup = renderAndGetSrcdoc(makeAdWithResolvedRender({ ctaText: "Download our free app today" }));
 
-      expect(markup).not.toContain("white-space:nowrap");
+      expect(markup).toContain("white-space:nowrap");
+      expect(markup).not.toContain("line-height:16px");
     });
 
     it("draws image-top side by side on a short ad", () => {
