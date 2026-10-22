@@ -38,3 +38,7 @@ Headless Chromium against the real built SDK (`dist/ad-serve-client.js`, version
 - Bare creative: the placeholder icon shows in the image area for `image-left` and `image-top`, and not for `overlay` or `text-only`.
 - Fonts in the screenshots are the browser default because the stub sent `inherit`.
 
+
+## Review fixes (2026-10-21, after the review of the adconfig PR)
+
+The first version hid the logo and button by fixed text-box heights (80px and 24px) that ignored the padding, the headline and the gap, so on short ad types (728x90, 468x60, 320x50) the headline was clipped or missing; the earlier browser checks only covered 300x250, 970x250 and 300x600. Reversed and replaced by thresholds computed from the content heights, a per-box headline line clamp (1 to 3 lines), `overflow:hidden` on the text box, and a rule that an ad shorter than 100px draws `image-top` side by side. The contract now carries a 28-row table (every layout at seven sizes, including those three) that each repo's tests parse and assert. Re-checked in a real browser at 728x90, 468x60 and 320x50 and again at the standard sizes: headlines end in an ellipsis and nothing is clipped. The classic layout is unchanged by design, so it still clips at 320x50 as it did before this feature.

@@ -139,9 +139,11 @@ function percentBox(box: LayoutBox): string {
   return `left:${box.left}%;top:${box.top}%;width:${box.width}%;height:${box.height}%;`;
 }
 
-// Three lines at most, and a word longer than the box breaks rather than overflows (spec 018 FR-008).
-const CLAMPED_TEXT_STYLE =
-  "display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;min-width:0;max-width:100%;";
+// As many lines as the text box has room for (up to three), and a word longer than the box breaks
+// rather than overflows (spec 018 FR-008).
+function clampedTextStyle(lines: number): string {
+  return `display:-webkit-box;-webkit-line-clamp:${lines};-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;min-width:0;max-width:100%;`;
+}
 
 // Everything below is already escaped or computed here; the layout name itself never reaches this
 // function, only the numbers and flags its geometry produced (spec 018 FR-005).
@@ -183,9 +185,9 @@ function buildLayoutMarkup(parts: LayoutParts): string {
   const textAlign = geometry.centered ? "center" : "left";
   const scrim = geometry.scrim ? "background-color:rgba(0,0,0,0.45);" : "";
   const headline = parts.headline
-    ? `<span style="font-size:14px;font-weight:700;color:${parts.headlineColor};font-family:${parts.headlineFont};${CLAMPED_TEXT_STYLE}">${parts.headline}</span>`
+    ? `<span style="font-size:14px;font-weight:700;color:${parts.headlineColor};font-family:${parts.headlineFont};${clampedTextStyle(geometry.headlineLines)}">${parts.headline}</span>`
     : "";
-  const textBox = `<div style="position:absolute;box-sizing:border-box;${percentBox(geometry.text)}display:flex;flex-direction:column;justify-content:center;align-items:${align};text-align:${textAlign};gap:4px;padding:8px;${scrim}">
+  const textBox = `<div style="position:absolute;box-sizing:border-box;${percentBox(geometry.text)}display:flex;flex-direction:column;justify-content:center;align-items:${align};text-align:${textAlign};gap:4px;padding:8px;overflow:hidden;${scrim}">
         ${geometry.showLogo ? parts.logo : ""}
         ${headline}
         ${geometry.showCta ? parts.cta : ""}

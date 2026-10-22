@@ -3,6 +3,7 @@ import { join } from "path";
 import { createAdRenderer } from "../../../src/renderer/adRenderer";
 import { makeAdWithResolvedRender } from "../fixtures/adCreative";
 import { CLASSIC_CASES } from "../fixtures/classicCases";
+import { layoutGeometry, type AdLayout } from "../../../src/utils/adLayout";
 import type { AdCandidate, PlacementIdentity } from "../../../src/types";
 
 const API_BASE_URL = "https://ads.example.com";
@@ -770,16 +771,25 @@ describe("createAdRenderer layouts (spec 018)", () => {
     ];
 
     it.each(layouts.flatMap((layout) => sizes.map((size) => [layout, size] as const)))(
-      "%s at %j clamps a long headline to three lines and breaks a long word",
+      "%s at %j clamps a long headline to the lines its box has room for and breaks a long word",
       (layout, [width, height]) => {
         const doc = drawn(adAt(width, height, { ...full, layout, headlineText: longHeadline }));
 
         const style = doc.querySelector("span")?.getAttribute("style") ?? "";
-        expect(style).toContain("-webkit-line-clamp:3;");
+        expect(style).toContain(`-webkit-line-clamp:${layoutGeometry(layout as AdLayout, width, height)?.headlineLines};`);
+        expect(textBox(doc).getAttribute("style")).toContain("overflow:hidden;");
         expect(style).toContain("overflow:hidden;");
         expect(style).toContain("overflow-wrap:anywhere;");
       },
     );
+
+    it("draws image-top side by side on a short ad", () => {
+      const doc = drawn(adAt(468, 60, { ...full, layout: "image-top" }));
+
+      expect(imageBox(doc)?.getAttribute("style")).toContain("width:50%;height:100%;");
+      expect(doc.querySelector(`img[src="${LOGO}"]`)).toBeNull();
+      expect(doc.body.textContent).toContain("Shop Now");
+    });
 
     it("leaves out the logo before the button when the text box is short", () => {
       const doc = drawn(adAt(300, 150, { ...full, layout: "image-top" }));

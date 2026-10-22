@@ -1,4 +1,6 @@
-import { AD_LAYOUTS, layoutGeometry, normalizeLayout } from "../../../src/utils/adLayout";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { AD_LAYOUTS, layoutGeometry, normalizeLayout, type AdLayout } from "../../../src/utils/adLayout";
 
 describe("normalizeLayout", () => {
   it.each(AD_LAYOUTS)("keeps %s", (name) => {
@@ -68,10 +70,57 @@ describe("layoutGeometry", () => {
     });
   });
 
-  it("drops the logo before the button, and the button last", () => {
-    // image-top text box: 40% of the height
-    expect(layoutGeometry("image-top", 970, 250)).toMatchObject({ showLogo: true, showCta: true });
-    expect(layoutGeometry("image-top", 300, 150)).toMatchObject({ showLogo: false, showCta: true });
-    expect(layoutGeometry("image-top", 300, 50)).toMatchObject({ showLogo: false, showCta: false });
+  it("draws image-top side by side on a short ad, and image-left stacked on a tall one", () => {
+    expect(layoutGeometry("image-top", 728, 90)).toEqual(layoutGeometry("image-left", 728, 90));
+    expect(layoutGeometry("image-top", 320, 100)?.image?.height).toBe(60);
+    expect(layoutGeometry("image-left", 300, 600)).toEqual(layoutGeometry("image-top", 300, 600));
+  });
+
+  it("drops the logo first, then the button, and always keeps room for one headline line", () => {
+    expect(layoutGeometry("overlay", 300, 90)).toMatchObject({ showLogo: true, showCta: true, headlineLines: 1 });
+    expect(layoutGeometry("overlay", 300, 70)).toMatchObject({ showLogo: false, showCta: true });
+    expect(layoutGeometry("overlay", 300, 50)).toMatchObject({ showLogo: false, showCta: false });
+    expect(layoutGeometry("overlay", 300, 20)).toMatchObject({ showCta: false, headlineLines: 1 });
+  });
+
+  it("gives the headline the lines left over once the logo and button are placed", () => {
+    expect(layoutGeometry("overlay", 300, 100)?.headlineLines).toBe(2);
+    expect(layoutGeometry("overlay", 300, 250)?.headlineLines).toBe(3);
+  });
+});
+
+// The table in the shared contract is the source of truth for every repo's renderer.
+describe("the shared contract's arrangement table", () => {
+  const contract = readFileSync(
+    join(__dirname, "../../../specs/018-ad-layout-presets/contracts/resolved-render.md"),
+    "utf8",
+  );
+  const rows = contract
+    .split("\n")
+    .map((line) => line.split("|").map((cell) => cell.trim()))
+    .filter((cells) => cells.length === 8 && /^\d+x\d+$/.test(cells[2]))
+    .map(([, layout, size, arrangement, logo, button, lines]) => ({ layout, size, arrangement, logo, button, lines }));
+
+  const arrangementOf = (geometry: NonNullable<ReturnType<typeof layoutGeometry>>) =>
+    geometry.image === null
+      ? "no image"
+      : geometry.image.width === 50
+        ? "side by side"
+        : geometry.image.height === 60
+          ? "stacked"
+          : "full";
+
+  it("has a row for every layout and size it describes", () => {
+    expect(rows).toHaveLength(28);
+  });
+
+  it.each(rows.map((row) => [`${row.layout} at ${row.size}`, row] as const))("%s", (_name, row) => {
+    const [width, height] = row.size.split("x").map(Number);
+    const geometry = layoutGeometry(row.layout as AdLayout, width, height)!;
+
+    expect(arrangementOf(geometry)).toBe(row.arrangement);
+    expect(geometry.showLogo ? "yes" : "no").toBe(row.logo);
+    expect(geometry.showCta ? "yes" : "no").toBe(row.button);
+    expect(String(geometry.headlineLines)).toBe(row.lines);
   });
 });
