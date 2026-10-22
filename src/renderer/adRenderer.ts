@@ -1,6 +1,7 @@
 import { escapeForMarkup } from "../utils/escapeForMarkup";
 import { asSafeString } from "../utils/asSafeString";
 import { buildTrackingUrl } from "../utils/buildTrackingUrl";
+import { layoutGeometry, normalizeLayout, type LayoutBox, type LayoutGeometry } from "../utils/adLayout";
 import type { AdCandidate, PlacementIdentity, ResolvedAdCreativeRender } from "../types";
 
 function asSafeBoolean(value: unknown, fallback: boolean): boolean {
@@ -132,6 +133,72 @@ function backgroundObjectPosition(value: unknown): string {
     : BACKGROUND_OBJECT_POSITIONS.center;
 }
 
+const GRADIENT = "linear-gradient(135deg,#7dd3fc,#0284c7)";
+
+function percentBox(box: LayoutBox): string {
+  return `left:${box.left}%;top:${box.top}%;width:${box.width}%;height:${box.height}%;`;
+}
+
+// Three lines at most, and a word longer than the box breaks rather than overflows (spec 018 FR-008).
+const CLAMPED_TEXT_STYLE =
+  "display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;min-width:0;max-width:100%;";
+
+// Everything below is already escaped or computed here; the layout name itself never reaches this
+// function, only the numbers and flags its geometry produced (spec 018 FR-005).
+interface LayoutParts {
+  geometry: LayoutGeometry;
+  adWidth: number;
+  adHeight: number;
+  wrapperTag: string;
+  wrapperAttrs: string;
+  ariaAttr: string;
+  backgroundImage: string;
+  backgroundPosition: string;
+  logo: string;
+  headline: string;
+  headlineColor: string;
+  headlineFont: string;
+  cta: string;
+}
+
+function buildLayoutMarkup(parts: LayoutParts): string {
+  const { geometry } = parts;
+
+  let imageBox = "";
+  if (geometry.image) {
+    const inner = parts.backgroundImage
+      ? `<img src="${parts.backgroundImage}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:${parts.backgroundPosition};" />`
+      : geometry.showPlaceholder
+        ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">${buildPlaceholderIcon(
+            Math.min(
+              (parts.adWidth * geometry.image.width) / 100,
+              (parts.adHeight * geometry.image.height) / 100,
+            ) / 3,
+          )}</div>`
+        : "";
+    imageBox = inner ? `<div style="position:absolute;overflow:hidden;${percentBox(geometry.image)}">${inner}</div>` : "";
+  }
+
+  const align = geometry.centered ? "center" : "flex-start";
+  const textAlign = geometry.centered ? "center" : "left";
+  const scrim = geometry.scrim ? "background-color:rgba(0,0,0,0.45);" : "";
+  const headline = parts.headline
+    ? `<span style="font-size:14px;font-weight:700;color:${parts.headlineColor};font-family:${parts.headlineFont};${CLAMPED_TEXT_STYLE}">${parts.headline}</span>`
+    : "";
+  const textBox = `<div style="position:absolute;box-sizing:border-box;${percentBox(geometry.text)}display:flex;flex-direction:column;justify-content:center;align-items:${align};text-align:${textAlign};gap:4px;padding:8px;${scrim}">
+        ${geometry.showLogo ? parts.logo : ""}
+        ${headline}
+        ${geometry.showCta ? parts.cta : ""}
+      </div>`;
+
+  return `<!DOCTYPE html><html><body style="margin:0;">
+    <${parts.wrapperTag} ${parts.wrapperAttrs}${parts.ariaAttr} style="position:absolute;inset:0;box-sizing:border-box;overflow:hidden;text-decoration:none;background:${GRADIENT};">
+      ${imageBox}
+      ${textBox}
+    </${parts.wrapperTag}>
+  </body></html>`;
+}
+
 function buildCreativeMarkup(
   ad: AdCandidate,
   apiBaseUrl: string,
@@ -220,6 +287,25 @@ function buildCreativeMarkup(
     ? { tag: "a", attrs: `href="${escapeForMarkup(clickHref)}" target="_blank" rel="noopener noreferrer"` }
     : { tag: "div", attrs: `role="group"` };
   const ariaAttr = ariaLabel ? ` aria-label="${ariaLabel}"` : "";
+
+  const geometry = layoutGeometry(normalizeLayout(r.layout), ad.width, ad.height);
+  if (geometry) {
+    return buildLayoutMarkup({
+      geometry,
+      adWidth: ad.width,
+      adHeight: ad.height,
+      wrapperTag: wrapper.tag,
+      wrapperAttrs: wrapper.attrs,
+      ariaAttr,
+      backgroundImage: hasBackgroundImage ? escapeForMarkup(asSafeString(r.backgroundImageDataUrl)) : "",
+      backgroundPosition: backgroundObjectPosition(r.backgroundImagePosition),
+      logo,
+      headline,
+      headlineColor,
+      headlineFont,
+      cta,
+    });
+  }
 
   // Layout mirrors adconfig's own preview (research.md): background layer,
   // then a top row (logo only — the disclosure icon is deliberately

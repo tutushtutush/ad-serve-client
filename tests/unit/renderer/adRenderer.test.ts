@@ -1,5 +1,8 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import { createAdRenderer } from "../../../src/renderer/adRenderer";
 import { makeAdWithResolvedRender } from "../fixtures/adCreative";
+import { CLASSIC_CASES } from "../fixtures/classicCases";
 import type { AdCandidate, PlacementIdentity } from "../../../src/types";
 
 const API_BASE_URL = "https://ads.example.com";
@@ -633,6 +636,188 @@ describe("createAdRenderer", () => {
       } as unknown as AdCandidate;
 
       expect(() => renderAndGetSrcdoc(ad)).not.toThrow();
+    });
+  });
+});
+
+// Spec 018: layout presets.
+describe("createAdRenderer layouts (spec 018)", () => {
+  const BG = "data:image/png;base64,BG";
+  const LOGO = "data:image/png;base64,LOGO";
+  const full = { hasBackgroundImage: true, backgroundImageDataUrl: BG, hasLogoImage: true, logoImageDataUrl: LOGO };
+
+  function adAt(width: number, height: number, overrides = {}): AdCandidate {
+    return { ...makeAdWithResolvedRender(overrides), width, height };
+  }
+
+  function drawn(ad: AdCandidate): Document {
+    return new DOMParser().parseFromString(renderAndGetSrcdoc(ad), "text/html");
+  }
+
+  // The image box is the element holding the background image; the text box is the one holding the headline.
+  const imageBox = (doc: Document) => doc.querySelector(`img[src="${BG}"]`)?.parentElement as HTMLElement | null;
+  const textBox = (doc: Document) => doc.querySelector("span")?.parentElement as HTMLElement;
+
+  describe("classic markup is unchanged (FR-004)", () => {
+    const golden = JSON.parse(
+      readFileSync(join(__dirname, "../fixtures/classicMarkup.golden.json"), "utf8"),
+    ) as Record<string, string>;
+    const render = (ad: AdCandidate) => renderAndGetSrcdoc(ad, API_BASE_URL, PLACEMENT, "sess-1");
+
+    it.each(Object.keys(CLASSIC_CASES))("%s matches the previous release", (name) => {
+      expect(render(CLASSIC_CASES[name]())).toBe(golden[name]);
+    });
+
+    it.each(Object.keys(CLASSIC_CASES))("%s with layout classic or a bad layout is identical", (name) => {
+      for (const layout of ["classic", "", "IMAGE-LEFT", "diagonal", 5, null, {}, []]) {
+        const ad = CLASSIC_CASES[name]();
+        if (ad.resolvedRender) (ad.resolvedRender as Record<string, unknown>).layout = layout;
+        expect(render(ad)).toBe(golden[name]);
+      }
+    });
+  });
+
+  describe("hostile values (FR-005, FR-011)", () => {
+    const hostile: unknown[] = [
+      '"><script>alert(1)</script>',
+      "' onload='alert(1)",
+      "image-left; background:url(x)",
+      "image-left\" style=\"x",
+      "</iframe>",
+      "x".repeat(10_000),
+      "__proto__",
+      "constructor",
+      { toString: () => "image-left" },
+      ["image-left"],
+      42,
+      true,
+    ];
+
+    it.each(hostile.map((value, index) => [index, value]))("case %i draws classic and does not echo the value", (_index, value) => {
+      const ad = makeAdWithResolvedRender();
+      (ad.resolvedRender as Record<string, unknown>).layout = value;
+
+      let markup = "";
+      expect(() => {
+        markup = renderAndGetSrcdoc(ad);
+      }).not.toThrow();
+
+      expect(markup).toBe(renderAndGetSrcdoc(makeAdWithResolvedRender()));
+      if (typeof value === "string" && value.length < 100) expect(markup).not.toContain(value);
+    });
+  });
+
+  it("image-left puts the image on the left half and the text on the right half", () => {
+    const doc = drawn(adAt(300, 250, { ...full, layout: "image-left" }));
+
+    expect(imageBox(doc)?.getAttribute("style")).toContain("left:0%;top:0%;width:50%;height:100%;");
+    expect(textBox(doc).getAttribute("style")).toContain("left:50%;top:0%;width:50%;height:100%;");
+    expect(textBox(doc).textContent).toContain("Shop Now");
+    expect(textBox(doc).querySelector(`img[src="${LOGO}"]`)).not.toBeNull();
+  });
+
+  it("image-left on a tall ad is arranged like image-top", () => {
+    const doc = drawn(adAt(300, 600, { ...full, layout: "image-left" }));
+
+    expect(imageBox(doc)?.getAttribute("style")).toContain("width:100%;height:60%;");
+    expect(textBox(doc).getAttribute("style")).toContain("left:0%;top:60%;width:100%;height:40%;");
+  });
+
+  it("image-top puts the image on top for 60% and the text below", () => {
+    const doc = drawn(adAt(300, 250, { ...full, layout: "image-top" }));
+
+    expect(imageBox(doc)?.getAttribute("style")).toContain("left:0%;top:0%;width:100%;height:60%;");
+    expect(textBox(doc).getAttribute("style")).toContain("left:0%;top:60%;width:100%;height:40%;");
+  });
+
+  it("overlay centers the text on a dark layer over a full-size image", () => {
+    const doc = drawn(adAt(300, 250, { ...full, layout: "overlay" }));
+
+    expect(imageBox(doc)?.getAttribute("style")).toContain("width:100%;height:100%;");
+    expect(textBox(doc).getAttribute("style")).toContain("text-align:center;");
+    expect(textBox(doc).getAttribute("style")).toContain("background-color:rgba(0,0,0,0.45);");
+  });
+
+  it("text-only draws no image even when the response has one, and keeps the text", () => {
+    const doc = drawn(adAt(300, 250, { ...full, layout: "text-only" }));
+
+    expect(doc.querySelector(`img[src="${BG}"]`)).toBeNull();
+    expect(textBox(doc).textContent).toContain("Summer Sale");
+    expect(textBox(doc).textContent).toContain("Shop Now");
+    expect(textBox(doc).getAttribute("style")).toContain("text-align:center;");
+  });
+
+  it.each(["image-left", "image-top", "overlay"])("%s keeps the background position inside the image box", (layout) => {
+    const doc = drawn(adAt(300, 250, { ...full, layout, backgroundImagePosition: "bottom-right" }));
+
+    expect(doc.querySelector(`img[src="${BG}"]`)?.getAttribute("style")).toContain("object-position:right bottom;");
+  });
+
+  it("keeps the link wrapper and aria label", () => {
+    const doc = drawn(adAt(300, 250, { layout: "image-left" }));
+
+    expect(doc.querySelector("a")?.getAttribute("href")).toBe("https://example.com/sale");
+    expect(doc.querySelector("a")?.getAttribute("aria-label")).toBe("Summer Sale banner");
+  });
+
+  describe("sizes and missing parts (US3)", () => {
+    const longHeadline = `${"Supercalifragilisticexpialidocious".repeat(6)} sale`;
+    const layouts = ["image-left", "image-top", "overlay", "text-only"];
+    const sizes: [number, number][] = [
+      [970, 250],
+      [300, 600],
+      [300, 250],
+    ];
+
+    it.each(layouts.flatMap((layout) => sizes.map((size) => [layout, size] as const)))(
+      "%s at %j clamps a long headline to three lines and breaks a long word",
+      (layout, [width, height]) => {
+        const doc = drawn(adAt(width, height, { ...full, layout, headlineText: longHeadline }));
+
+        const style = doc.querySelector("span")?.getAttribute("style") ?? "";
+        expect(style).toContain("-webkit-line-clamp:3;");
+        expect(style).toContain("overflow:hidden;");
+        expect(style).toContain("overflow-wrap:anywhere;");
+      },
+    );
+
+    it("leaves out the logo before the button when the text box is short", () => {
+      const doc = drawn(adAt(300, 150, { ...full, layout: "image-top" }));
+
+      expect(doc.querySelector(`img[src="${LOGO}"]`)).toBeNull();
+      expect(doc.body.textContent).toContain("Shop Now");
+    });
+
+    it("leaves out the button too when the text box is shorter than the button", () => {
+      const doc = drawn(adAt(300, 50, { ...full, layout: "image-top" }));
+
+      expect(doc.body.textContent).not.toContain("Shop Now");
+      expect(doc.body.textContent).toContain("Summer Sale");
+    });
+
+    it.each(layouts)("%s draws nothing for a missing logo, headline or button, and no stray image", (layout) => {
+      const doc = drawn(adAt(300, 250, { layout, headlineText: "", ctaText: "" }));
+
+      expect(doc.querySelectorAll("img")).toHaveLength(0);
+      expect(doc.body.textContent?.trim()).toBe("");
+      expect(doc.querySelector("[role=button]")).toBeNull();
+    });
+
+    it.each([
+      ["image-left", 1],
+      ["image-top", 1],
+      ["overlay", 0],
+      ["text-only", 0],
+    ])("%s with no image draws %i placeholder icon(s)", (layout, count) => {
+      const doc = drawn(adAt(300, 250, { layout }));
+
+      expect(doc.querySelectorAll("svg")).toHaveLength(count);
+    });
+
+    it("draws an ad with a zero size as classic", () => {
+      const ad = adAt(0, 0, { ...full, layout: "image-left" });
+
+      expect(renderAndGetSrcdoc(ad)).toBe(renderAndGetSrcdoc(adAt(0, 0, full)));
     });
   });
 });

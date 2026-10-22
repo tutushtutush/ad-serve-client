@@ -68,6 +68,9 @@ export interface ResolvedAdCreativeRender {
   backgroundImageDataUrl?: string;
   // One of nine names (spec 014); anything else is drawn centered.
   backgroundImagePosition?: string;
+  // One of five names (spec 018): classic, image-left, image-top, overlay, text-only; anything else is
+  // drawn as classic.
+  layout?: string;
   isLinked?: boolean;
   linkUrl?: string;
   ariaLabel?: string;
