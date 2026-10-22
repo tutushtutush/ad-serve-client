@@ -18,4 +18,4 @@
 ## Phase 3: Polish
 
 - [x] T008 `npx tsc --noEmit`, lint, the whole Jest suite, and the build (`dist`, as the repo's scripts require); update the README layout section with one line about short Classic ads
-- [ ] T009 After merge: tag the next minor after `v1.10.0`; then ad-serve-api bumps its pin (one-line PR) and the test-site check runs (adconfig spec 109 T017)
+- [x] T009 After merge: tag the next minor after `v1.10.0`; then ad-serve-api bumps its pin (one-line PR) and the test-site check runs (adconfig spec 109 T017)
