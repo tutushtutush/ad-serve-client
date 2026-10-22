@@ -1,6 +1,7 @@
 import { escapeForMarkup } from "../utils/escapeForMarkup";
 import { asSafeString } from "../utils/asSafeString";
 import { buildTrackingUrl } from "../utils/buildTrackingUrl";
+import { layoutGeometry, normalizeLayout, type LayoutBox, type LayoutGeometry } from "../utils/adLayout";
 import type { AdCandidate, PlacementIdentity, ResolvedAdCreativeRender } from "../types";
 
 function asSafeBoolean(value: unknown, fallback: boolean): boolean {
@@ -132,6 +133,79 @@ function backgroundObjectPosition(value: unknown): string {
     : BACKGROUND_OBJECT_POSITIONS.center;
 }
 
+const GRADIENT = "linear-gradient(135deg,#7dd3fc,#0284c7)";
+
+function percentBox(box: LayoutBox): string {
+  return `left:${box.left}%;top:${box.top}%;width:${box.width}%;height:${box.height}%;`;
+}
+
+// As many lines as the text box has room for (up to three), and a word longer than the box breaks
+// rather than overflows (spec 018 FR-008).
+function clampedTextStyle(lines: number): string {
+  return `display:-webkit-box;-webkit-line-clamp:${lines};-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;min-width:0;max-width:100%;`;
+}
+
+// The geometry counts the button as 22px tall and the headline line as 18px, so in a layout the button is
+// one line of 16px (plus its 3px padding) that is cut with an ellipsis, and the headline line is 18px.
+const FIXED_HEIGHT_CTA_STYLE =
+  "line-height:16px;max-width:100%;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+
+// Everything below is already escaped or computed here; the layout name itself never reaches this
+// function, only the numbers and flags its geometry produced (spec 018 FR-005).
+interface LayoutParts {
+  geometry: LayoutGeometry;
+  adWidth: number;
+  adHeight: number;
+  wrapperTag: string;
+  wrapperAttrs: string;
+  ariaAttr: string;
+  backgroundImage: string;
+  backgroundPosition: string;
+  logo: string;
+  headline: string;
+  headlineColor: string;
+  headlineFont: string;
+  cta: string;
+}
+
+function buildLayoutMarkup(parts: LayoutParts): string {
+  const { geometry } = parts;
+
+  let imageBox = "";
+  if (geometry.image) {
+    const inner = parts.backgroundImage
+      ? `<img src="${parts.backgroundImage}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:${parts.backgroundPosition};" />`
+      : geometry.showPlaceholder
+        ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">${buildPlaceholderIcon(
+            Math.min(
+              (parts.adWidth * geometry.image.width) / 100,
+              (parts.adHeight * geometry.image.height) / 100,
+            ) / 3,
+          )}</div>`
+        : "";
+    imageBox = inner ? `<div style="position:absolute;overflow:hidden;${percentBox(geometry.image)}">${inner}</div>` : "";
+  }
+
+  const align = geometry.centered ? "center" : "flex-start";
+  const textAlign = geometry.centered ? "center" : "left";
+  const scrim = geometry.scrim ? "background-color:rgba(0,0,0,0.45);" : "";
+  const headline = parts.headline
+    ? `<span style="font-size:14px;font-weight:700;color:${parts.headlineColor};font-family:${parts.headlineFont};line-height:18px;${clampedTextStyle(geometry.headlineLines)}">${parts.headline}</span>`
+    : "";
+  const textBox = `<div style="position:absolute;box-sizing:border-box;${percentBox(geometry.text)}display:flex;flex-direction:column;justify-content:center;align-items:${align};text-align:${textAlign};gap:4px;padding:8px;overflow:hidden;${scrim}">
+        ${geometry.showLogo ? parts.logo : ""}
+        ${headline}
+        ${geometry.showCta ? parts.cta : ""}
+      </div>`;
+
+  return `<!DOCTYPE html><html><body style="margin:0;">
+    <${parts.wrapperTag} ${parts.wrapperAttrs}${parts.ariaAttr} style="position:absolute;inset:0;box-sizing:border-box;overflow:hidden;text-decoration:none;background:${GRADIENT};">
+      ${imageBox}
+      ${textBox}
+    </${parts.wrapperTag}>
+  </body></html>`;
+}
+
 function buildCreativeMarkup(
   ad: AdCandidate,
   apiBaseUrl: string,
@@ -163,9 +237,11 @@ function buildCreativeMarkup(
   // for the headline, which has no background and so stayed harmless when
   // empty.
   const ctaBackground = asSafeCssColor(r.ctaBackgroundColor, "#ffffff");
-  const cta = ctaText
-    ? `<span role="button" style="border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;color:${ctaColor};background-color:${ctaBackground};font-family:${ctaFont};">${ctaText}</span>`
-    : "";
+  const buildCta = (extraStyle: string) =>
+    ctaText
+      ? `<span role="button" style="border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;color:${ctaColor};background-color:${ctaBackground};font-family:${ctaFont};${extraStyle}">${ctaText}</span>`
+      : "";
+  const cta = buildCta("");
 
   const hasLogoImage = hasResolvedImage(r.hasLogoImage, r.logoImageDataUrl);
   const logoBackgroundEnabled = asSafeBoolean(r.logoBackgroundEnabled, true);
@@ -221,6 +297,25 @@ function buildCreativeMarkup(
     : { tag: "div", attrs: `role="group"` };
   const ariaAttr = ariaLabel ? ` aria-label="${ariaLabel}"` : "";
 
+  const geometry = layoutGeometry(normalizeLayout(r.layout), ad.width, ad.height);
+  if (geometry) {
+    return buildLayoutMarkup({
+      geometry,
+      adWidth: ad.width,
+      adHeight: ad.height,
+      wrapperTag: wrapper.tag,
+      wrapperAttrs: wrapper.attrs,
+      ariaAttr,
+      backgroundImage: hasBackgroundImage ? escapeForMarkup(asSafeString(r.backgroundImageDataUrl)) : "",
+      backgroundPosition: backgroundObjectPosition(r.backgroundImagePosition),
+      logo,
+      headline,
+      headlineColor,
+      headlineFont,
+      cta: buildCta(FIXED_HEIGHT_CTA_STYLE),
+    });
+  }
+
   // Layout mirrors adconfig's own preview (research.md): background layer,
   // then a top row (logo only — the disclosure icon is deliberately
   // omitted, it's non-data-driven chrome) and a bottom block (headline, then
@@ -235,7 +330,7 @@ function buildCreativeMarkup(
   // (and silently break again if a <head> or extra wrapper layer is ever
   // inserted between them and here).
   return `<!DOCTYPE html><html><body style="margin:0;">
-    <${wrapper.tag} ${wrapper.attrs}${ariaAttr} style="position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;padding:8px;overflow:hidden;text-decoration:none;background:linear-gradient(135deg,#7dd3fc,#0284c7);">
+    <${wrapper.tag} ${wrapper.attrs}${ariaAttr} style="position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;padding:8px;overflow:hidden;text-decoration:none;background:${GRADIENT};">
       ${backgroundLayer}
       <div style="position:relative;display:flex;align-items:flex-start;">${logo}</div>
       <div style="position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;">

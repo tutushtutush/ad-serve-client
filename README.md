@@ -94,6 +94,10 @@ Later requests carry no identifier, the stored one is removed, and the attribute
 
 The identifier goes on ad requests only (not on click or viewable-impression reports) and is never rendered. On a single-slot request it travels in the URL's query string, which a CDN or host can record in its access logs, and with several slots it travels in the request body; so use a random identifier that is not tied to a person. The attribute must be exactly `local`; any other value is ignored with a console warning. If storage is blocked, nothing is sent and ads work as before. Details: [viewer-id-embed.md](specs/017-viewer-identifier-for/contracts/viewer-id-embed.md).
 
+## Ad layouts
+
+An advertiser can choose how an ad is arranged (image beside the text, image above it, text over the image, or text only). The choice is made in adconfig and carried in the ad that ad-serve-api sends, so **nothing changes for a platform embedding this SDK**: there is no new attribute or call. An ad with no choice, or one this version does not know, is drawn as it always was.
+
 ## Development
 
 ```bash
