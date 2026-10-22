@@ -54,3 +54,7 @@ Not changed, with reasons: the overlay scrim with no image (a recorded decision 
 ## Release and test-environment check (2026-10-22)
 
 Merged as `0ff5dfb` and tagged `v1.10.0` (annotated, like the earlier tags). **Releasing this SDK needs a second step:** ad-serve-api serves it from a pin in its `package.json`, so a pin-bump PR there (#98, as #71 did for v1.7.0) is what puts it in front of pages. After that deployed, the test service's `/ad-serve-client.js` held the layout code, ads without a layout drew as before, and a test ad set to Image left was drawn by the deployed SDK on the EventPulse test site (image box and text box each 50% wide, as in the contract), then set back to Classic. Details in adconfig `specs/101-ad-layout-presets/research.md`.
+
+## Convergence (2026-10-22)
+
+Checked the code against spec, plan and tasks. Everything the spec requires is built and verified; the one gap was the spec's own text: US3 acceptance 2 and FR-008 still described the first draft's fixed 80px and 24px thresholds, while the contract and code use content-based heights (see "Review fixes"). The spec was updated to match (T014). No code change.

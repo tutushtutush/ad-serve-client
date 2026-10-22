@@ -40,7 +40,7 @@ This is the first of three releases: ad-serve-client, then ad-serve-api, then ad
 ## Phase 6: Polish and release
 
 - [X] T011 Bump `package.json` to 1.10.0 and add a short "Ad layouts" note to `README.md`: nothing changes for a platform, the layout is chosen in adconfig and served by ad-serve-api.
-- [ ] T012 Run `npm test`, `npm run lint`, `npx tsc --noEmit` and `npm run build`; confirm [contracts/resolved-render.md](contracts/resolved-render.md) is byte-identical to adconfig's copy and to ad-serve-api's when that exists.
+- [X] T012 Run `npm test`, `npm run lint`, `npx tsc --noEmit` and `npm run build`; confirm [contracts/resolved-render.md](contracts/resolved-render.md) is byte-identical to adconfig's copy and to ad-serve-api's when that exists.
 - [X] T013 Open the PR (description ends with the Claude Code line from the project's attribution rule); merge only on the owner's word; after release confirm on the test site that served ads are unchanged (SC-004). Done: #29 merged as `0ff5dfb`, tagged `v1.10.0`; ad-serve-api serves the SDK from a pin, so its pin was bumped (ad-serve-api #98) before it reached the test site. Confirmed 2026-10-22: the test service serves the new SDK, ads with no layout are unchanged, and a test ad set to Image left was drawn by it on the EventPulse test site, then set back (adconfig spec 101 research, T021).
 
 ## Dependencies
@@ -50,3 +50,8 @@ T001 first, before any source change. T002 and T003 then T004. T005 and T006 aft
 ## Implementation strategy
 
 MVP is Phases 1 to 4. Because the release changes nothing visible until ad-serve-api passes the field through, it can merge and ship alone.
+
+## Phase 7: Convergence
+
+- [X] T014 Update the spec's text-fit wording (US3 acceptance 1 and 2, FR-008) to the content-based thresholds, the one-to-three-line clamp and the short-ad rule that the contract and the code use, in place of the first draft's fixed 80px and 24px per spec FR-002 and FR-008 (contradicts). Done in this pass: the owner-reviewed change is recorded in research.md ("Review fixes"); the spec text had been left at the first draft.
+

@@ -61,8 +61,8 @@ Each layout holds up at every ad size, with a long headline, and with parts miss
 
 **Acceptance Scenarios**:
 
-1. **Given** any layout and a long headline, **When** drawn, **Then** the headline stops after three lines with an ellipsis and a word longer than the text area breaks instead of overflowing.
-2. **Given** a text area shorter than 80px, **When** drawn, **Then** the logo is left out before any text is; **Given** one shorter than 24px, **Then** the button is left out too.
+1. **Given** any layout and a long headline, **When** drawn, **Then** the headline stops at the lines its text area has room for (one to three) with an ellipsis and a word longer than the text area breaks instead of overflowing.
+2. **Given** a text area too short to hold the logo, the headline and the button, **When** drawn, **Then** the logo is left out first, then the button, and one line of headline is always kept; **Given** an ad shorter than 100px, **Then** "image-top" is drawn side by side so the text has room. The heights are in the contract.
 3. **Given** no image in the response, **When** a layout with an image area beside the text ("image-left", "image-top") is drawn, **Then** the usual placeholder icon shows in the image area; for "overlay" and "text-only" no icon is drawn.
 4. **Given** no logo, headline or button, **When** drawn, **Then** nothing is drawn for the missing part and nothing overlaps.
 
@@ -101,7 +101,7 @@ The layout value comes from a response the SDK does not control. Whatever it hol
 - **FR-005**: The `layout` value MUST be looked up in a fixed list of names and MUST NOT itself appear in the drawn markup.
 - **FR-006**: "image-left" on an ad taller than it is wide MUST be drawn as "image-top".
 - **FR-007**: The background image position MUST keep deciding which part of the image is shown, inside the image's area, for every layout that shows an image.
-- **FR-008**: The headline MUST stop after three lines with an ellipsis, and a word longer than its area MUST break; the logo MUST be left out when the text area is shorter than 80px and the button when it is shorter than 24px.
+- **FR-008**: The headline MUST stop after three lines with an ellipsis, and a word longer than its area MUST break; the logo MUST be left out first and then the button when the text area cannot hold them, using the heights in the contract (fixed line heights make them exact), the headline taking the lines that are left (one to three); an ad shorter than 100px MUST draw "image-top" side by side.
 - **FR-009**: When there is no image, "image-left" and "image-top" MUST show the placeholder icon in the image area; "overlay" and "text-only" MUST NOT draw it.
 - **FR-010**: "text-only" MUST NOT show the image even when the response has one.
 - **FR-011**: A bad `layout` MUST NOT cause an error, a warning to the host page, or any visible difference from `classic`.
