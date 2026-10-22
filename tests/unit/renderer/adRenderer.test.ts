@@ -700,9 +700,9 @@ describe("createAdRenderer layouts (spec 018)", () => {
     const long = { ...full, headlineText: LONG, ctaText: "Buy Now", layout: "classic" };
 
     it.each([
-      [300, 250, 11],
-      [970, 250, 11],
-      [300, 600, 31],
+      [300, 250, 9],
+      [970, 250, 9],
+      [300, 600, 27],
       [728, 90, 1],
       [320, 100, 2],
     ])("clamps a long headline at %ix%i to %i lines", (width, height, lines) => {
@@ -713,8 +713,8 @@ describe("createAdRenderer layouts (spec 018)", () => {
     });
 
     it("gives the room of a missing logo or button to the headline", () => {
-      expect(renderAndGetSrcdoc(adAt(300, 250, { ...long, hasLogoImage: false }))).toContain("-webkit-line-clamp:12;");
-      expect(renderAndGetSrcdoc(adAt(300, 250, { ...long, ctaText: "" }))).toContain("-webkit-line-clamp:12;");
+      expect(renderAndGetSrcdoc(adAt(300, 250, { ...long, hasLogoImage: false }))).toContain("-webkit-line-clamp:10;");
+      expect(renderAndGetSrcdoc(adAt(300, 250, { ...long, ctaText: "" }))).toContain("-webkit-line-clamp:10;");
       expect(renderAndGetSrcdoc(adAt(320, 100, { ...long, hasLogoImage: false, ctaText: "" }))).toContain("-webkit-line-clamp:4;");
     });
 
@@ -732,7 +732,7 @@ describe("createAdRenderer layouts (spec 018)", () => {
 
     it("leaves a short ad to the rule of spec 019 and the other layouts alone", () => {
       expect(renderAndGetSrcdoc(adAt(468, 60, long))).toContain("-webkit-line-clamp:1;");
-      expect(renderAndGetSrcdoc(adAt(300, 250, { ...long, layout: "overlay" }))).not.toContain("-webkit-line-clamp:11;");
+      expect(renderAndGetSrcdoc(adAt(300, 250, { ...long, layout: "overlay" }))).not.toContain("-webkit-line-clamp:9;");
     });
   });
 

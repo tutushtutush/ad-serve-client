@@ -4,7 +4,7 @@
 
 ## Summary
 
-Add `classicHeadlineLines(adHeight, { hasLogo, hasCta })` to `src/utils/adLayout.ts` (returns null for a bad height or an ad under 82px, via `classicFit`), with the SDK's constants (line 17, button 19). In the classic template of `src/renderer/adRenderer.ts` add the line clamp (`clampedTextStyle`) to the headline and the one-line limit to the button when the function returns a number; the template string is otherwise untouched.
+Add `classicHeadlineLines(adHeight, { hasLogo, hasCta })` to `src/utils/adLayout.ts` (returns null for a bad height or an ad under 82px, via `classicFit`), with the SDK's constants (line 20, button 21). In the classic template of `src/renderer/adRenderer.ts` add the line clamp (`clampedTextStyle`) to the headline and the one-line limit to the button when the function returns a number; the template string is otherwise untouched.
 
 ## Technical Context
 

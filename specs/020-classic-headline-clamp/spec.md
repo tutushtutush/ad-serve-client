@@ -35,7 +35,7 @@ The SDK asserts the shared table of adconfig's `contracts/classic-headline.md` (
 ## Requirements *(mandatory)*
 
 - **FR-001**: At 82px tall and over, a classic ad's logo, headline and button MUST stay inside the ad whatever the length of the headline or button label.
-- **FR-002**: The headline MUST be limited to `max(1, floor(room / 17))` lines with no cap at three, where `room` is the ad height minus 16, minus 18 when a logo is drawn, minus 4 plus 19 when a button is drawn (the SDK's measured line and button heights), and a cut headline MUST end in an ellipsis.
+- **FR-002**: The headline MUST be limited to `max(1, floor(room / 20))` lines with no cap at three, where `room` is the ad height minus 16, minus 18 when a logo is drawn, minus 4 plus 21 when a button is drawn (the SDK's line and button heights, rounded up to cover the default serif of Android and the Windows UI font), and a cut headline MUST end in an ellipsis.
 - **FR-003**: The button MUST stay on one line and end in an ellipsis.
 - **FR-004**: A single very long word MUST break inside the ad's width.
 - **FR-005**: An ad that fits MUST have the same geometry as before; its markup differs from the previous release's only by the two added style strings.
@@ -51,6 +51,6 @@ The SDK asserts the shared table of adconfig's `contracts/classic-headline.md` (
 
 ## Assumptions
 
-- The SDK's line (17) and button (19) are the largest values measured in the default, sans, serif and mono fonts (adconfig spec 110 research D3); the preview uses 21 and 22.
+- The SDK's line (20) and button (21) are above the values measured on the Mac in the default, sans, serif and mono fonts (16 to 17 and 18 to 19) so that a platform default font with taller lines (Android's Noto Serif, Windows' UI font, about 19 and 21) stays inside the ad; the preview uses 21 and 22 (adconfig spec 110 research D3).
 - The version moves to 1.12.0 in this PR; the tag goes on the merge commit; ad-serve-api then bumps its pin.
 - Out of scope: right-to-left text, a headline length limit in the editor, new layouts.

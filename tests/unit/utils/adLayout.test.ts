@@ -187,8 +187,8 @@ describe("classicHeadlineLines (spec 020)", () => {
   const both = { hasLogo: true, hasCta: true };
 
   it.each([
-    [250, 11],
-    [600, 31],
+    [250, 9],
+    [600, 27],
     [90, 1],
     [100, 2],
   ])("allows %i-high ads %i lines with a logo and a button", (height, lines) => {
@@ -196,8 +196,8 @@ describe("classicHeadlineLines (spec 020)", () => {
   });
 
   it("gives the room of a missing logo or button to the headline", () => {
-    expect(classicHeadlineLines(250, { hasLogo: false, hasCta: true })).toBe(12);
-    expect(classicHeadlineLines(250, { hasLogo: true, hasCta: false })).toBe(12);
+    expect(classicHeadlineLines(250, { hasLogo: false, hasCta: true })).toBe(10);
+    expect(classicHeadlineLines(250, { hasLogo: true, hasCta: false })).toBe(10);
     expect(classicHeadlineLines(100, { hasLogo: false, hasCta: false })).toBe(4);
   });
 

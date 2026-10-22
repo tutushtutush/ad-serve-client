@@ -241,12 +241,11 @@ function buildCreativeMarkup(
     ctaText
       ? `<span role="button" style="border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;color:${ctaColor};background-color:${ctaBackground};font-family:${ctaFont};${extraStyle}">${ctaText}</span>`
       : "";
+  const hasLogoImage = hasResolvedImage(r.hasLogoImage, r.logoImageDataUrl);
   // A classic headline that does not fit is cut to the lines that do and a long button label stays on one line
   // (spec 020); null keeps the markup as it was.
-  const classicLines = classicHeadlineLines(ad.height, { hasLogo: hasResolvedImage(r.hasLogoImage, r.logoImageDataUrl), hasCta: Boolean(ctaText) });
+  const classicLines = classicHeadlineLines(ad.height, { hasLogo: hasLogoImage, hasCta: Boolean(ctaText) });
   const cta = buildCta(classicLines ? ONE_LINE_CTA_STYLE : "");
-
-  const hasLogoImage = hasResolvedImage(r.hasLogoImage, r.logoImageDataUrl);
   const logoBackgroundEnabled = asSafeBoolean(r.logoBackgroundEnabled, true);
   const logoBackgroundColor = asSafeCssColor(r.logoBackgroundColor, "#ffffff");
   const logo = hasLogoImage

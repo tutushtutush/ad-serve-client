@@ -118,11 +118,13 @@ export function classicFit(adHeight: number): TextFit | null {
   return fit.showLogo ? null : fit;
 }
 
-// Classic sets no line height, so in the SDK's iframe (no base style, line height "normal") a headline line is
-// 17px and the button 19px, where adconfig's preview draws 21px and 22px. The largest values measured in the
-// default, sans, serif and mono fonts, so a font with a taller line is still inside (spec 020, adconfig spec 110).
-const CLASSIC_HEADLINE_LINE = 17;
-const CLASSIC_BUTTON_HEIGHT = 19;
+// Classic sets no line height, so in the SDK's iframe (no base style, line height "normal") a headline line and
+// the button are as tall as the browser's default font makes them: 16 to 17px and 18 to 19px in the fonts measured
+// here, but about 19px and 21px in the default serif of Android (Noto Serif) and the Windows UI font. 20 and 21
+// keep a headline inside the ad on those too; an ad with shorter lines is cut a line early only when its headline
+// is already extremely long (spec 020 review, adconfig spec 110 research D3).
+const CLASSIC_HEADLINE_LINE = 20;
+const CLASSIC_BUTTON_HEIGHT = 21;
 
 /**
  * How many headline lines classic may draw on an ad of 82px and over (spec 020), or null when it draws no limit

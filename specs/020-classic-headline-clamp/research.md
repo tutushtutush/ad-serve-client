@@ -3,6 +3,7 @@
 Decisions and measurements are in adconfig `specs/110-classic-headline-clamp/research.md`. Specific to this repo:
 
 - **R1 - Pre-110 reference first.** The golden file was copied to `classicMarkup.pre110.golden.json` in a commit of its own before any code change (this branch's first commit).
+- **R3 - Constants raised on review (option A).** The first version used 17 and 19, the Mac measurements. Review pointed out that other platforms' default font has taller lines (about 19px headline and 21px button), so a headline at the limit could run a few pixels out. The constants are now 20 and 21; the cost is that an extreme headline (10 or more lines at 300x250) in a font with shorter lines is cut a line or two earlier than it needed to be.
 - **R2 - Reference geometry.** Saved from the unchanged renderer before the change (`ref110-sdk-before.json`, scratchpad): at 300x250 headline 202 to 219, button 223 to 242, logo 8 to 26.
 
 ## Real-browser check (T007, 2026-10-22)
