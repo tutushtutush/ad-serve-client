@@ -173,7 +173,6 @@ describe("changing and clearing the labels (021, US3)", () => {
     ["an object", { labels: ["a"] }],
     ["undefined", undefined],
     ["a symbol", Symbol("x")],
-    ["a list of only unusable entries", ["has space", 3, ""]],
   ])("refuses %s: nothing changes and it warns once", async (_name, value) => {
     const { orchestrator, requestAd, warn, run } = setup();
 
@@ -184,6 +183,18 @@ describe("changing and clearing the labels (021, US3)", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toContain("setAudience ignored");
     expect(requestAd.mock.calls[0][0].audience).toEqual(["keep-me"]);
+  });
+
+  it("clears the previous labels, with one warning, for a list with entries but none usable", async () => {
+    const { orchestrator, requestAd, warn, run } = setup();
+
+    orchestrator.setAudience(["previous-viewer"]);
+    orchestrator.setAudience(["has space", 3, ""]);
+    await run();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain("setAudience: none of the labels were usable");
+    expect(requestAd.mock.calls[0][0]).not.toHaveProperty("audience");
   });
 
   it("never lets an error out, whether the warning function throws or is missing", () => {

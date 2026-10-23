@@ -421,8 +421,10 @@ export function createAdOrchestrator({
   }
 
   // `setAudience(list)` replaces the labels; `null` or an empty list clears them (a sign-out or a withdrawn
-  // consent). Anything else is a mistake on the host page, including a list with entries but none usable, so it
-  // is reported once and changes nothing: a typo must not silently drop or replace targeting. Never throws.
+  // consent). A list with entries but none usable also clears them, with one warning: these labels describe the
+  // viewer, so after a sign-in or a consent change the safe failure is to send none, never the previous
+  // viewer's. (Page categories keep their old value in this case; they describe the page, not a person.)
+  // A value that is not a list at all is a mistake on the host page: one warning, nothing changes. Never throws.
   function setAudience(value: unknown): void {
     try {
       if (value === null || (Array.isArray(value) && value.length === 0)) {
@@ -432,6 +434,11 @@ export function createAdOrchestrator({
       const labels = normalizeAudienceLabels(value);
       if (labels.length > 0) {
         pageAudience = labels;
+        return;
+      }
+      if (Array.isArray(value)) {
+        pageAudience = [];
+        warn?.("[ad-serve] setAudience: none of the labels were usable, so the audience was cleared.");
         return;
       }
       warn?.("[ad-serve] setAudience ignored: pass a list of label strings (or null to clear them).");

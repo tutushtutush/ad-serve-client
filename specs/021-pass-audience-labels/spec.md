@@ -72,7 +72,7 @@ A viewer's labels can change during a visit (the viewer signs in, picks a team, 
 1. **Given** labels already set, **When** the page calls `setAudience(["b"])`, **Then** later requests carry only `b`.
 2. **Given** labels already set, **When** the page calls `setAudience(null)` or `setAudience([])`, **Then** later requests carry no labels.
 3. **Given** labels already set, **When** the page calls it with something that is not a list or null (a string, a number, an object, no argument, several arguments), **Then** nothing changes and one console warning says so.
-4. **Given** labels already set, **When** the page passes a list with entries but none usable, **Then** nothing changes and one console warning says so (a typo cannot silently drop or replace targeting).
+4. **Given** labels already set, **When** the page passes a list with entries but none usable, **Then** the labels are cleared and one console warning says so (these labels describe a person, so the safe failure is to send none, never the previous viewer's).
 
 ---
 
@@ -111,7 +111,7 @@ Labels come from the host page's own code. The SDK cleans them to the form the s
 
 - **FR-001**: The SDK MUST offer `window.adServe.setAudience(labels)` once started, and accept `["setAudience", labels]` on `window.adServe.q` before that, applied before the first ad requests exactly as `setContext` and `setViewerId` are.
 - **FR-002**: `labels` MUST be a list of strings, `null`, or an empty list. A list replaces the page's labels; `null` or an empty list clears them. Any other value, a call with no argument or with more than one, MUST change nothing and write one console warning, never throw.
-- **FR-003**: A list with at least one entry but no usable one MUST change nothing and write one console warning.
+- **FR-003**: A list with at least one entry but no usable one MUST clear the labels and write one console warning.
 - **FR-004**: The SDK MUST clean labels to the serving API's form before use: trim, lowercase, keep only entries matching `^[a-z0-9][a-z0-9_:.-]*$` of 1 to 40 characters, remove repeats keeping the first, then keep at most the first 20.
 - **FR-005**: Every ad request made after labels are set MUST carry them: on a single request as the `audience` query parameter (comma-separated), on a batch request as the top-level `audience` field of the body (a list), and on a single request that a failed batch falls back to.
 - **FR-006**: With no labels set, every request MUST be identical to what it is today (no `audience` parameter or field).

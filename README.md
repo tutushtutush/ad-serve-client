@@ -109,7 +109,8 @@ window.adServe.setAudience(null);   // or []
 
 - A list **replaces** the labels; `null` or `[]` clears them. It applies to requests made after the call and is kept in memory for that page view only (the SDK never stores it, so call it on every page).
 - Each label is trimmed and lowercased, and kept only if it uses letters, digits and `- _ : .` (starting with a letter or digit) and is 1 to 40 characters. Repeats count once and only the first 20 are sent.
-- Anything that is not a list or `null` (a string, a number, no argument, several arguments), and a list with no usable label, is ignored with a console warning and changes nothing, so a typo cannot silently drop your targeting.
+- Anything that is not a list or `null` (a string, a number, `undefined`, no argument, several arguments) is ignored with a console warning and changes nothing. A list whose entries are all unusable **clears** the labels (with a warning): these labels describe the viewer, so after a sign-in or a consent change the SDK sends none rather than the previous viewer's.
+- **Timing.** Labels apply to requests made after the call; ads already requested or shown are not asked for again. Set them before the SDK starts (queue the call, as above) so the first requests carry them. If you learn them later (after a consent check or a profile fetch), call `window.adServe.refresh()` for slots you added afterwards; slots already filled keep their ad.
 - Labels go on ad requests only (not on click or viewable-impression reports) and are never rendered. On a single-slot request they travel in the URL's query string, which a CDN or host can record in its access logs; with several slots they travel in the request body.
 - They are the same for the whole page. There is no slot attribute for them: a static attribute cannot say who the current viewer is.
 

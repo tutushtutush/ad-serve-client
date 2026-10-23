@@ -41,7 +41,7 @@ Format: `- [ ] [ID] [P?] [Story] Description with file path`. `[P]` = different 
 **Goal**: replace, clear and refuse behave as the contract says.
 **Independent Test**: set, replace, clear and send bad values; each request shows the state.
 
-- [X] T011 [US3] Extend `tests/unit/orchestrator/adOrchestrator.audience.test.ts`: a second valid list replaces the first (not merged); `null` and `[]` clear; clearing then setting works; a string, a number, an object, `undefined` and a Symbol change nothing and warn once each; an array of only invalid entries changes nothing and warns once, while an empty array clears without a warning; a `warn` that throws, or no `warn`, never lets an error out of `setAudience` (Principle V).
+- [X] T011 [US3] Extend `tests/unit/orchestrator/adOrchestrator.audience.test.ts`: a second valid list replaces the first (not merged); `null` and `[]` clear; clearing then setting works; a string, a number, an object, `undefined` and a Symbol change nothing and warn once each; an array of only invalid entries clears the labels and warns once (changed after the PR review, research.md), while an empty array clears without a warning; a `warn` that throws, or no `warn`, never lets an error out of `setAudience` (Principle V).
 
 ## Phase 6: User Story 4 - A bad label list can never break the page or the request (Priority: P2)
 

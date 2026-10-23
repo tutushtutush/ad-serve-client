@@ -10,9 +10,9 @@
 
 ## D2 What a value means
 
-**Decision**: a list of strings replaces the labels; `null` or `[]` clears them; any other value (string, number, object, no argument, several arguments) changes nothing and warns once; a list with entries but none usable changes nothing and warns once.
+**Decision**: a list of strings replaces the labels; `null` or `[]` clears them; any other value (string, number, object, no argument, several arguments) changes nothing and warns once; a list with entries but none usable clears the labels and warns once.
 
-**Rationale**: clearing must be explicit and easy, because a withdrawn consent or a sign-out is the case where a stale label is wrong. A typo that happens to look like a list but yields nothing must not silently clear (or replace) targeting; this is `setContext`'s rule ("had entries but none usable: malformed, not a clear"). A bare string is refused rather than split, so a page does not depend on a separator convention the SDK would then have to keep.
+**Rationale**: clearing must be explicit and easy, because a withdrawn consent or a sign-out is the case where a stale label is wrong. A list that yields nothing usable also clears (with a warning), unlike `setContext`'s rule for page categories ("had entries but none usable: malformed, not a clear"): categories describe the page, these labels describe a person, and after a sign-in or a consent change the safe failure is to send none, never the previous viewer's (changed after the PR review, see below). A bare string is refused rather than split, so a page does not depend on a separator convention the SDK would then have to keep.
 
 **Alternatives considered**: accept a comma-separated string (two ways to say one thing, and the server's own comma parsing would be the SDK's contract); treat an unusable list as a clear (silently drops targeting on a typo).
 
@@ -89,3 +89,15 @@ Real Chromium (Playwright) against the built bundle (`dist/ad-serve-client.js`, 
 | 7 Bad input | `"oops"`, no argument and two arguments changed nothing; a following valid list (`other-label`) was sent; the open campaign served (no match) |
 | 8 Not stored | No label in `localStorage`, `sessionStorage` or cookies in any run; viewable-impression reports carry no `audience` |
 | 9 Test environment | Not run: needs the tag, ad-serve-api's pin bump and a deploy |
+
+## Review of PR #37
+
+Six findings; one behaviour changed, one documentation gap closed, four left on purpose.
+
+- **Changed: a list with no usable label now clears the labels (with a warning)** instead of keeping the previous ones. The labels describe a person, so on a sign-in or consent change the safe failure is to send none, not the previous viewer's. Spec FR-003 and US3, D2, the data model, the embed contract, the README and the tests were updated.
+- **Documented: timing.** Labels apply to requests made after the call; ads already requested are not asked for again, and the README now says to queue the call before the SDK starts and to use `refresh()` for slots added later.
+- **Left: labels in the single-request URL.** The README already says a single-slot request puts them in the query string, which a CDN or host can log; 20 labels of up to 40 characters is about a kilobyte at most. Sending single requests as POST would change the API contract for every request; it is not worth it for this.
+- **Left: `setAudience(undefined)` keeps the old labels with a warning.** `undefined` is "not a list", the same refusal as a string; a page that does not know the viewer yet should not call it (or pass `null` to clear).
+- **Left: one sentinel per command.** `MALFORMED_AUDIENCE_CALL` mirrors `MALFORMED_VIEWER_ID_CALL`; merging them is a cleanup for the code that is not part of this feature.
+- **Left: labels dropped in cleaning are not warned about** (case and spaces are fixed silently; invalid and over-20 entries are dropped). The README lists exactly what is cleaned; a warning per call would be noise for a call that runs once per page.
+- **`.specify/feature.json`** restored to the repository's pretty-printed form.

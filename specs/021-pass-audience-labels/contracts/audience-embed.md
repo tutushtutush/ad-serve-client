@@ -15,6 +15,6 @@ window.adServe.setAudience(null);   // or []
 | a list of strings | replaces the labels; cleaned (trim, lowercase, pattern, 1 to 40 characters, repeats once, first 20) |
 | `null` or `[]` | clears the labels |
 | a string, number, object, no argument, several arguments | nothing changes; one console warning |
-| a list with entries, none usable | nothing changes; one console warning |
+| a list with entries, none usable | clears the labels; one console warning |
 
 Queued entries are applied before the first ad requests of the page; the last valid one wins. A call applies to requests made after it. Labels are kept in memory for the page view only (call it on every page), are never stored, and are not sent on click or viewable-impression reports. The SDK does not read consent signals: only call it for visitors your privacy rules allow. Labels must not identify a person.
