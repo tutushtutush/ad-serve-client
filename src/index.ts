@@ -25,6 +25,9 @@ declare global {
       // Gives the SDK the platform's own viewer identifier (a UUID), or withdraws it with null (feature 017).
       // Exists once the SDK has started; before that, queue it as ["setViewerId", value].
       setViewerId?: (...args: unknown[]) => void;
+      // Gives the SDK the viewer's audience labels for this page view, or clears them with null (feature 021).
+      // Exists once the SDK has started; before that, queue it as ["setAudience", labels].
+      setAudience?: (...args: unknown[]) => void;
     };
   }
 }
@@ -56,6 +59,8 @@ function getLocalStorageSafely(): Storage | undefined {
 // Stands in for the value of a setViewerId call made with the wrong number of arguments; it is never a UUID,
 // null or "", so the orchestrator refuses it exactly like any other bad value.
 const MALFORMED_VIEWER_ID_CALL = Symbol("malformed setViewerId call");
+// The same for a setAudience call with the wrong number of arguments: not a list and not null, so it is refused.
+const MALFORMED_AUDIENCE_CALL = Symbol("malformed setAudience call");
 
 function runWhenPageReady(callback: () => void): void {
   // This script loads via <script async>, which can execute before the
@@ -131,7 +136,11 @@ function main(): void {
       // are applied here, ahead of run(). Plain callbacks keep running after it, below, since they
       // may call refresh(), which needs the initial run and its definition below to exist
       // (research.md Decision 2).
-      const commandHandlers = { setContext: orchestrator.setContext, setViewerId: orchestrator.setViewerId };
+      const commandHandlers = {
+        setContext: orchestrator.setContext,
+        setViewerId: orchestrator.setViewerId,
+        setAudience: orchestrator.setAudience,
+      };
       for (const queued of window.adServe.q) {
         if (isQueuedCommand(queued)) {
           applyQueuedCommand(queued, commandHandlers);
@@ -152,6 +161,11 @@ function main(): void {
       // page, so it goes through the same refusal as a bad value: one warning, nothing changed.
       adServe.setViewerId = (...args) => {
         applyQueuedCommand(["setViewerId", args.length === 1 ? args[0] : MALFORMED_VIEWER_ID_CALL], commandHandlers);
+      };
+      // Exactly one argument is the list (or null). Anything else is a mistake on the host page, so it goes
+      // through the same refusal as a bad value: one warning, nothing changed.
+      adServe.setAudience = (...args) => {
+        applyQueuedCommand(["setAudience", args.length === 1 ? args[0] : MALFORMED_AUDIENCE_CALL], commandHandlers);
       };
       adServe.refresh = (root) => {
         try {

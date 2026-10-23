@@ -17,6 +17,9 @@ export interface AdDecisionRequest {
   country?: string;
   deviceType?: string;
   category?: string;
+  // Audience labels the host page gave the SDK for this page view (feature 021), already cleaned. Page-level, not
+  // a slot attribute; present only when labels are set.
+  audience?: string[];
   // This SDK's own originated visitor session identifier (feature 008) — not parsed from a slot's
   // data-* attributes like the other fields here; the Orchestrator supplies it uniformly for
   // every request, not AdSlotConfig/parseSlotConfig. See adOrchestrator.ts.
@@ -109,6 +112,7 @@ export interface BatchSharedFields {
   category?: string;
   sessionId?: string;
   viewerId?: string;
+  audience?: string[];
 }
 
 // Just the two fields needed to build a click URL (feature 004) — not the full
