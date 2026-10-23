@@ -66,4 +66,26 @@
 
 ## Approaches started and rejected
 
-None yet. Anything started and reversed during implementation is recorded here with its reason.
+- **A test stub that answered every batch with an empty `results` list** (copied from the viewer-id index test) made the SDK treat the batch as failed and fall back to singles, so a "first batch request" test saw three requests. The stub now answers a batch with one `no-ad` or `found` entry per placement. The behaviour tested (labels on the fallback singles) was right; only the fixture was wrong.
+- **Nothing else was started and reversed.**
+
+## Implementation findings
+
+- **Comma encoding (contract):** `URLSearchParams` writes the joining comma as `%2C`; the server decodes it (checked live below). The request contract now says so.
+- **No consent signal, no storage:** `tests/unit/index.audience.test.ts` pins that nothing reaches `localStorage`, `sessionStorage`, cookies or the page markup, and that only ad requests carry the label.
+
+## Quickstart run (T015)
+
+Real Chromium (Playwright) against the built bundle (`dist/ad-serve-client.js`, 1.13.0) and the real local ad-serve-api (spec 061, merged), with two throwaway campaigns on one placement: a labelled one (`follows-team-x`, `age-25-34`, weight 100) and an open one (weight 1), both removed afterwards. Which ad was served is read from the `adConfigId` in the viewable-impression report (`...0001` labelled, `...0002` open).
+
+| Step | Result |
+|---|---|
+| 1 Tests, types, lint, build | Pass: 799 tests, `tsc`, `eslint`, `npm run build` |
+| 2 Nothing set | Request has no `audience`; the open campaign served |
+| 3 Method after load (`setAudience([...])`, new slot, `refresh()`) | The new request has `audience=follows-team-x`; the labelled campaign served; the first request, made before the call, had none |
+| 4 Queued before the script (`" Follows-Team-X "`) | The very first request has `audience=follows-team-x` (cleaned); the labelled campaign served |
+| 5 Batch and fallback | Covered by unit tests (batch shared fields, failed batch, no batch client); not run in the browser (one slot per page) |
+| 6 Replace and clear | After `setAudience([...])` then `setAudience(null)` the next request has no `audience` and the open campaign is served |
+| 7 Bad input | `"oops"`, no argument and two arguments changed nothing; a following valid list (`other-label`) was sent; the open campaign served (no match) |
+| 8 Not stored | No label in `localStorage`, `sessionStorage` or cookies in any run; viewable-impression reports carry no `audience` |
+| 9 Test environment | Not run: needs the tag, ad-serve-api's pin bump and a deploy |

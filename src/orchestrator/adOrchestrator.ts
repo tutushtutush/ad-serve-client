@@ -1,5 +1,6 @@
 import { asSafeString } from "../utils/asSafeString";
 import { normalizeCategories } from "../utils/normalizeCategories";
+import { normalizeAudienceLabels } from "../utils/normalizeAudienceLabels";
 import { groupSlotsForBatch } from "../utils/groupSlotsForBatch";
 import { parseBreakpointList, pickByBreakpoint, type BreakpointEntry } from "../utils/breakpointList";
 import { isViewerId, type ViewerIdStoreLike } from "../utils/viewerId";
@@ -409,6 +410,36 @@ export function createAdOrchestrator({
     }
   }
 
+  // The viewer's audience labels the host page gave for this page view (feature 021), already cleaned. Held in
+  // memory only, read when each request is built (never captured on a slot and never part of a slot's identity,
+  // so a later call reaches every request after it and cannot split a batch), and never sent on reports.
+  let pageAudience: string[] = [];
+
+  // The key is left out entirely when there are no labels, so a request without them is the object it always was.
+  function audienceField(): { audience?: string[] } {
+    return pageAudience.length === 0 ? {} : { audience: [...pageAudience] };
+  }
+
+  // `setAudience(list)` replaces the labels; `null` or an empty list clears them (a sign-out or a withdrawn
+  // consent). Anything else is a mistake on the host page, including a list with entries but none usable, so it
+  // is reported once and changes nothing: a typo must not silently drop or replace targeting. Never throws.
+  function setAudience(value: unknown): void {
+    try {
+      if (value === null || (Array.isArray(value) && value.length === 0)) {
+        pageAudience = [];
+        return;
+      }
+      const labels = normalizeAudienceLabels(value);
+      if (labels.length > 0) {
+        pageAudience = labels;
+        return;
+      }
+      warn?.("[ad-serve] setAudience ignored: pass a list of label strings (or null to clear them).");
+    } catch {
+      // A broken logger must never break the host page (Constitution Principle V).
+    }
+  }
+
   // Wrapped, not called directly — caught in review of #10: unlike every other schedule-driven
   // entry point in this file, a bare call to a slot's notify hook had no guard of its own. If
   // `slot.notifySettled()` itself ever threw (a hostile/patched host-page global, a broken
@@ -554,6 +585,7 @@ export function createAdOrchestrator({
         category: resolveCategory(slot.config.category),
         sessionId,
         ...viewerIdField(),
+        ...audienceField(),
       });
       applyResult(slot, result);
     } catch {
@@ -622,6 +654,7 @@ export function createAdOrchestrator({
           category: sharedCategory,
           sessionId,
           ...viewerIdField(),
+          ...audienceField(),
         })) ?? null;
     } catch {
       results = null;
@@ -824,5 +857,5 @@ export function createAdOrchestrator({
     }
   }
 
-  return { run, setContext, setViewerId };
+  return { run, setContext, setViewerId, setAudience };
 }

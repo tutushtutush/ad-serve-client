@@ -59,6 +59,10 @@ function buildQueryString(request: AdDecisionRequest): string {
   if (request.viewerId) {
     params.set("viewerId", request.viewerId);
   }
+  // Feature 021: only when the host page gave labels. Labels cannot contain a comma, so joining is lossless.
+  if (request.audience && request.audience.length > 0) {
+    params.set("audience", request.audience.join(","));
+  }
   return params.toString();
 }
 
@@ -181,6 +185,7 @@ export function createAdDecisionClient(
         ...(shared.category && { category: shared.category }),
         ...(shared.sessionId && { sessionId: shared.sessionId }),
         ...(shared.viewerId && { viewerId: shared.viewerId }),
+        ...(shared.audience && shared.audience.length > 0 && { audience: shared.audience }),
         dedupe: true,
       };
       const response = await withTimeout(batchTimeoutMs(timeoutMs, requests.length), (signal) =>

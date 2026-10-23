@@ -6,7 +6,7 @@ Matches ad-serve-api's `contracts/audience-labels-matching.md` (its spec 061, me
 
 `GET {apiBaseUrl}/ads?platformId=...&adTypeId=...[&country=...][&deviceType=...][&category=...][&sessionId=...][&viewerId=<uuid>][&audience=<label>,<label>]`
 
-`audience` is added only when labels are set, after the existing parameters, comma-separated (labels cannot contain a comma). With none, the query string is exactly what it was before this feature. The query string can be recorded in a CDN's or host's access logs.
+`audience` is added only when labels are set, after the existing parameters, comma-separated (labels cannot contain a comma; the comma is percent-encoded as `%2C` in the URL, which the server decodes). With none, the query string is exactly what it was before this feature. The query string can be recorded in a CDN's or host's access logs.
 
 ## Batch request
 
